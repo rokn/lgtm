@@ -28,6 +28,7 @@ function ago(iso) {
 const ghOpen = (u) => native.openExternal(u);
 
 async function gql(query, variables) {
+  if (S.token === 'demo') return {};
   const r = await fetch('https://api.github.com/graphql', {
     method: 'POST', headers: { Authorization: 'bearer ' + S.token, 'Content-Type': 'application/json' },
     body: JSON.stringify({ query, variables }),
@@ -69,6 +70,7 @@ async function queriesFor(source) {
   return [`${base} user:${d.viewer.login}`, ...d.viewer.organizations.nodes.map((o) => `${base} org:${o.login}`)];
 }
 async function loadPRs() {
+  if (S.token === 'demo') { S.prs = DEMO.prs; S.loading = false; return updateList(); }
   S.loading = true; updateList();
   try {
     const qs = await queriesFor(S.source);
@@ -289,6 +291,7 @@ async function openPR(pr) {
   S.view = 'pr';
   S.d = { pr, files: [], cur: null, loading: true, filter: ls('ff', ''), hideViewed: false, prId: pr.id, hist: [] };
   mountPR(); updateFiles();
+  if (S.token === 'demo') { S.d.files = DEMO.files(); S.d.loading = false; return updateFiles(); }
   try {
     const nwo = pr.repository.nameWithOwner;
     const restFiles = (async () => { const out = []; for (let p = 1; p <= 30; p++) { const r = await rest(`/repos/${nwo}/pulls/${pr.number}/files?per_page=100&page=${p}`); out.push(...r); if (r.length < 100) break; } return out; })();
@@ -698,6 +701,7 @@ function render() {
 function start() { S.view = 'list'; mountList(); updateList(); loadPRs(); }
 $('#app').addEventListener('click', (e) => { listClick(e); prClick(e); if (e.target.closest('button')) e.target.closest('button').blur(); });
 (async () => {
+  if (await native.isDemo()) { S.token = 'demo'; return start(); }
   const { token } = await native.getToken();
   if (token) { S.token = token; start(); } else render();
 })();

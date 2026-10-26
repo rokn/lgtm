@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, safeStorage, shell, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, safeStorage, shell, Menu, nativeTheme } = require('electron');
 const { execFile } = require('child_process');
 const fs = require('fs');
 const path = require('path');
@@ -32,6 +32,7 @@ ipcMain.handle('token:set', (_e, token) => {
   fs.mkdirSync(path.dirname(tokenFile()), { recursive: true });
   fs.writeFileSync(tokenFile(), data, { mode: 0o600 });
 });
+ipcMain.handle('demo', () => !!process.env.LGTM_DEMO);
 ipcMain.handle('token:clear', () => { try { fs.unlinkSync(tokenFile()); } catch {} });
 ipcMain.handle('open:external', (_e, url) => {
   if (/^https:\/\/github\.com\//.test(url)) shell.openExternal(url);
@@ -46,13 +47,29 @@ function createWindow() {
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, sandbox: true },
   });
   win.loadFile(path.join(__dirname, 'index.html'));
+  if (process.env.LGTM_SHOTS) win.webContents.once('did-finish-load', () => takeShots(win, process.env.LGTM_SHOTS));
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https:\/\/github\.com\//.test(url)) shell.openExternal(url);
     return { action: 'deny' };
   });
 }
 
+// Dev helper: LGTM_DEMO=1 LGTM_SHOTS=docs/screenshots npm start  -> renders the demo data and saves PNGs.
+async function takeShots(win, dir) {
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  const run = (js) => win.webContents.executeJavaScript(js);
+  const shot = async (name) => { win.setContentSize(1400, 900); await wait(600); fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(path.join(dir, name + '.png'), (await win.webContents.capturePage()).toPNG()); };
+  win.setContentSize(1400, 900); await wait(1500);
+  await run(`S.sel = 1; updateList()`); await shot('list');
+  await run(`openPR(S.shown.find((p) => p.number === 1284))`); await wait(800);
+  await run(`S.d.cur = 'internal/server/middleware.go'; updateFiles()`); await shot('review');
+  await run(`openPalette(); const i = $('#pq'); i.value = 'idempotency'; i.dispatchEvent(new Event('input'))`); await shot('search');
+  await run(`closePalette(); S.d.cur = 'internal/ratelimit/limiter.go'; updateFiles(); openFind(); $('#fq').value = 'bucket'; S.find.q = 'bucket'; updateFind(false)`); await shot('find');
+  app.quit();
+}
+
 app.whenReady().then(() => {
+  if (process.env.LGTM_SHOTS) nativeTheme.themeSource = 'dark';
   Menu.setApplicationMenu(Menu.buildFromTemplate([
     ...(process.platform === 'darwin' ? [{ role: 'appMenu' }] : []),
     { role: 'editMenu' },

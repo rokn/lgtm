@@ -1,6 +1,7 @@
 {
   "name": "lgtm",
   "version": "0.1.0",
+  "license": "MIT",
   "description": "All your GitHub PRs in one fast, keyboard-driven view",
   "main": "src/main.js",
   "scripts": {
