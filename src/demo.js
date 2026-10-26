@@ -22,6 +22,7 @@ const DEMO = (() => {
     mk(8, 'acme/api', 1271, 'Upgrade grpc-go and regenerate protobufs', 'Mechanical upgrade, mostly generated files.', 'maria', '#8250df', 74, 2310, 1980, 63, 'REVIEW_REQUIRED', 'SUCCESS', [lab('deps', '0366d6')], false, 0, 'CLEAN'),
     mk(9, 'acme/infra', 505, 'Terraform: move staging VPC into its own state', 'Needs a careful `terraform state mv`.', 'tomas', '#cf222e', 96, 120, 95, 11, 'REVIEW_REQUIRED', null, [lab('infra', '0e8a16')], false, 8),
   ];
+  prs[0]._chg = ['New commits', '2 new comments']; prs[3]._chg = ['CI passed']; prs[8]._chg = ['New PR'];
   const F = (filename, status, patch, extra = {}) => {
     const l = patch.split('\n'); return { filename, status, patch, additions: l.filter((x) => x[0] === '+').length, deletions: l.filter((x) => x[0] === '-').length, changes: l.length, ...extra };
   };

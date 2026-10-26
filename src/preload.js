@@ -5,6 +5,8 @@ contextBridge.exposeInMainWorld('native', {
   clearToken: () => ipcRenderer.invoke('token:clear'),
   openExternal: (u) => ipcRenderer.invoke('open:external', u),
   openEditor: (o) => ipcRenderer.invoke('editor:open', o),
+  focusWindow: () => ipcRenderer.invoke('focus'),
+  setBadge: (n) => ipcRenderer.invoke('badge', n),
   isDemo: () => ipcRenderer.invoke('demo'),
   platform: process.platform,
 });

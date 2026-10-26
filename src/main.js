@@ -37,6 +37,8 @@ ipcMain.handle('token:set', (_e, token) => {
   fs.writeFileSync(tokenFile(), data, { mode: 0o600 });
 });
 ipcMain.handle('editor:open', (_e, o) => openInEditor(o, app.getPath('userData')));
+ipcMain.handle('focus', () => { const w = BrowserWindow.getAllWindows()[0]; if (!w) return; if (w.isMinimized()) w.restore(); w.show(); w.focus(); });
+ipcMain.handle('badge', (_e, n) => { try { app.setBadgeCount(Math.max(0, n | 0)); } catch {} });
 ipcMain.handle('demo', () => !!process.env.LGTM_DEMO);
 ipcMain.handle('token:clear', () => { try { fs.unlinkSync(tokenFile()); } catch {} });
 ipcMain.handle('open:external', (_e, url) => {

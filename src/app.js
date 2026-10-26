@@ -6,6 +6,7 @@ const lset = (k, v) => { try { localStorage.setItem('sp.' + k, JSON.stringify(v)
 if (native.platform === 'darwin') document.body.classList.add('mac');
 
 const S = {
+  loadSeq: 0,
   drawer: { open: false, tab: 'conv', sel: 0 },
   hideTests: ls('hideTests', true),
   token: null, view: 'login', prs: [], sel: 0, loading: false,
@@ -15,7 +16,7 @@ const S = {
 };
 const SOURCES = [['review', 'Review requested'], ['mine', 'Mine'], ['involved', 'Involved'], ['orgs', 'All in my orgs']];
 const SORTS = ['updated', 'created', 'size', 'repo'];
-const CHIPS = [['merge:ready', 'Ready to merge'], ['merge:behind', 'Needs update'], ['merge:auto', 'Auto-merging'], ['merge:conflict', 'Conflicts'], ['-is:draft', 'Hide drafts'], ['is:approved', 'Approved'], ['is:changes', 'Changes requested'], ['is:unreviewed', 'Needs review'], ['ci:fail', 'CI failing']];
+const CHIPS = [['is:updated', '● Updated'], ['merge:ready', 'Ready to merge'], ['merge:behind', 'Needs update'], ['merge:auto', 'Auto-merging'], ['merge:conflict', 'Conflicts'], ['-is:draft', 'Hide drafts'], ['is:approved', 'Approved'], ['is:changes', 'Changes requested'], ['is:unreviewed', 'Needs review'], ['ci:fail', 'CI failing']];
 
 /* ---------- helpers ---------- */
 let toastT;
@@ -46,7 +47,7 @@ async function rest(path) {
 }
 
 /* ---------- data: PR list ---------- */
-const PR_FIELDS = `id number title bodyText url isDraft mergeable mergeStateStatus autoMergeRequest { enabledAt } createdAt updatedAt additions deletions changedFiles reviewDecision
+const PR_FIELDS = `id number title bodyText url isDraft headRefOid mergeable mergeStateStatus autoMergeRequest { enabledAt } reviews { totalCount } reviewThreads { totalCount } createdAt updatedAt additions deletions changedFiles reviewDecision
   author { login avatarUrl(size: 44) } repository { nameWithOwner }
   labels(first: 5) { nodes { name color } } comments { totalCount }
   commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }`;
@@ -70,15 +71,66 @@ async function queriesFor(source) {
   const d = await gql('{ viewer { login organizations(first:50){nodes{login}} } }');
   return [`${base} user:${d.viewer.login}`, ...d.viewer.organizations.nodes.map((o) => `${base} org:${o.login}`)];
 }
-async function loadPRs() {
-  if (S.token === 'demo') { S.prs = DEMO.prs; S.loading = false; return updateList(); }
-  S.loading = true; updateList();
+/* ---------- change tracking, background refresh, notifications ---------- */
+const pollCfg = () => ({ notify: true, secs: 60, ...ls('poll', {}) });
+const snap = (p) => ({ oid: p.headRefOid, act: p.comments.totalCount + (p.reviews?.totalCount || 0) + (p.reviewThreads?.totalCount || 0), rd: p.reviewDecision || '', ci: ci(p) || '', mk: mergeKind(p) || '' });
+// Compares each PR with what you last looked at (you "look" by opening it). Returns true when this source was only just baselined.
+function computeChanges(prs, source) {
+  const seen = ls('seen', {}), base = ls('baselined', []);
+  if (!base.includes(source)) { prs.forEach((p) => { seen[p.id] = snap(p); p._chg = []; }); lset('seen', seen); lset('baselined', [...base, source]); return true; }
+  for (const p of prs) {
+    const o = seen[p.id], n = snap(p), c = [];
+    if (!o) c.push('New PR');
+    else {
+      if (n.oid !== o.oid) c.push('New commits');
+      if (n.act > o.act) c.push(`${n.act - o.act} new comment${n.act - o.act > 1 ? 's' : ''}`);
+      if (n.rd !== o.rd && n.rd) c.push({ APPROVED: 'Approved', CHANGES_REQUESTED: 'Changes requested', REVIEW_REQUIRED: 'Review required' }[n.rd]);
+      if (n.ci !== o.ci && ['SUCCESS', 'FAILURE', 'ERROR'].includes(n.ci)) c.push(n.ci === 'SUCCESS' ? 'CI passed' : 'CI failed');
+      if (n.mk !== o.mk && n.mk === 'ready' && o.mk) c.push('Ready to merge');
+    }
+    p._chg = c;
+  }
+  return false;
+}
+function markSeen(prs) {
+  const seen = ls('seen', {}); prs.forEach((p) => { seen[p.id] = snap(p); p._chg = []; }); lset('seen', seen); updateBadge();
+}
+const notified = new Map(); // pr id -> signature we already told you about
+const sigOf = (p) => JSON.stringify([snap(p), p._chg]);
+function primeNotified(prs) { prs.forEach((p) => { if (p._chg?.length) notified.set(p.id, sigOf(p)); }); }
+function notifyChanges(prs) {
+  const fresh = prs.filter((p) => p._chg?.length && notified.get(p.id) !== sigOf(p));
+  fresh.forEach((p) => notified.set(p.id, sigOf(p)));
+  if (!fresh.length || !pollCfg().notify || document.hasFocus() || !window.Notification) return;
+  const go = (p) => () => { native.focusWindow(); if (p) openPR(p); };
+  const show = (title, body, p) => { try { const n = new Notification(title, { body }); n.onclick = go(p); } catch {} };
+  if (fresh.length <= 3) fresh.forEach((p) => show(`${p.repository.nameWithOwner} #${p.number}`, `${p.title}\n${p._chg.join(' · ')}`, p));
+  else show(`${fresh.length} pull requests updated`, fresh.slice(0, 4).map((p) => `#${p.number} ${p._chg[0]}`).join('\n'), null);
+}
+function updateBadge() {
+  const n = S.prs.filter((p) => p._chg?.length).length;
+  document.title = n ? `LGTM (${n})` : 'LGTM'; native.setBadge(n);
+}
+let pollT;
+function schedulePoll() {
+  clearTimeout(pollT);
+  pollT = setTimeout(async () => { if (S.token && S.token !== 'demo' && S.view !== 'login' && !S.loading && !merging) await loadPRs(true); schedulePoll(); }, Math.max(15, pollCfg().secs) * 1000);
+}
+addEventListener('focus', () => { if (S.token && S.token !== 'demo' && S.view !== 'login' && !S.loading && Date.now() - (S.lastLoad || 0) > 20000) loadPRs(true); });
+
+async function loadPRs(silent) {
+  if (S.token === 'demo') { S.prs = DEMO.prs; S.loading = false; updateBadge(); return updateList(); }
+  const mine = ++S.loadSeq, src = S.source;
+  if (!silent) { S.loading = true; updateList(); }
   try {
-    const qs = await queriesFor(S.source);
-    const all = (await Promise.all(qs.map(searchPRs))).flat();
-    S.prs = [...new Map(all.map((p) => [p.id, p])).values()];
-  } catch (e) { toast('Load failed: ' + e.message); }
-  S.loading = false; updateList();
+    const qs = await queriesFor(src);
+    const prs = [...new Map((await Promise.all(qs.map(searchPRs))).flat().map((p) => [p.id, p])).values()];
+    if (mine !== S.loadSeq) return;
+    const baseline = computeChanges(prs, src);
+    S.keepId = S.shown[S.sel]?.id; S.prs = prs; S.lastLoad = Date.now();
+    if (silent && !baseline) notifyChanges(prs); else primeNotified(prs);
+  } catch (e) { if (!silent) toast('Load failed: ' + e.message); }
+  finally { if (mine === S.loadSeq) { S.loading = false; updateList(); updateBadge(); } }
 }
 
 /* ---------- list filtering ---------- */
@@ -109,6 +161,7 @@ function matches(p, terms) {
     else if (key === 'author') ok = (p.author?.login || '').toLowerCase().includes(val);
     else if (key === 'label') ok = p.labels.nodes.some((l) => l.name.toLowerCase().includes(val));
     else if (key === 'ci') ok = { fail: ['FAILURE', 'ERROR'], pass: ['SUCCESS'], pending: ['PENDING', 'EXPECTED'] }[val]?.includes(ci(p)) ?? false;
+    else if (key === 'is' && val === 'updated') ok = !!p._chg?.length;
     else if (key === 'merge') ok = mergeKind(p) === val;
     else if (key === 'is') ok = { draft: p.isDraft, ready: !p.isDraft, approved: p.reviewDecision === 'APPROVED', changes: p.reviewDecision === 'CHANGES_REQUESTED', unreviewed: p.reviewDecision === 'REVIEW_REQUIRED' || !p.reviewDecision }[val] ?? false;
     else ok = hay.includes(val);
@@ -165,6 +218,7 @@ function updateList() {
   if (S.view !== 'list' || !$('#prs')) return;
   const terms = parseQuery(S.q);
   S.shown = S.prs.filter((p) => matches(p, terms)).sort(SORT_FN[S.sort]);
+  if (S.keepId) { const i = S.shown.findIndex((p) => p.id === S.keepId); if (i >= 0) S.sel = i; S.keepId = null; }
   S.sel = Math.max(0, Math.min(S.sel, S.shown.length - 1));
   document.querySelectorAll('[data-src]').forEach((b) => b.classList.toggle('on', b.dataset.src === S.source));
   $('#sortb').textContent = 'Sort: ' + S.sort;
@@ -179,7 +233,8 @@ function updateList() {
   if (S.loading && !S.prs.length) main.innerHTML = '<div class="spin">Loading pull requests…</div>';
   else if (!S.shown.length) main.innerHTML = `<div class="empty">${S.prs.length ? 'No PRs match this filter.' : 'No open PRs here 🎉'}</div>`;
   else main.innerHTML = S.shown.map(prRow).join('');
-  $('#count').textContent = `${S.shown.length} of ${S.prs.length} PRs${S.loading ? ' · refreshing…' : ''}`;
+  const nUpd = S.prs.filter((p) => p._chg?.length).length;
+  $('#count').textContent = `${S.shown.length} of ${S.prs.length} PRs${nUpd ? ` · ${nUpd} updated` : ''}${S.loading ? ' · refreshing…' : ''}`;
   main.querySelector('.sel')?.scrollIntoView({ block: 'nearest' });
 }
 function prRow(p, i) {
@@ -187,8 +242,8 @@ function prRow(p, i) {
   const st = ci(p); const dot = st === 'SUCCESS' ? 'ok' : st === 'FAILURE' || st === 'ERROR' ? 'bad' : st ? 'pend' : '';
   return `<div class="pr ${i === S.sel ? 'sel' : ''}" data-pr="${i}">
     <img src="${esc(p.author?.avatarUrl || '')}" alt="">
-    <div><div><span class="t">${esc(p.title)}</span></div>
-      <div class="meta"><span>${esc(p.repository.nameWithOwner)} #${p.number}</span><span>${esc(p.author?.login || 'ghost')}</span>
+    <div><div>${p._chg?.length ? '<span class="ud"></span>' : ''}<span class="t">${esc(p.title)}</span></div>
+      <div class="meta">${(p._chg || []).map((c) => `<span class="badge b-new">● ${esc(c)}</span>`).join('')}<span>${esc(p.repository.nameWithOwner)} #${p.number}</span><span>${esc(p.author?.login || 'ghost')}</span>
         ${p.isDraft ? '<span class="badge b-draft">Draft</span>' : ''}${MERGE_BADGE[mergeKind(p)] ? `<span class="badge ${MERGE_BADGE[mergeKind(p)][0]}">${MERGE_BADGE[mergeKind(p)][1]}</span>` : ''}${rd ? `<span class="badge ${rd[0]}">${rd[1]}</span>` : ''}
         ${p.labels.nodes.map((l) => `<span class="label" style="background:#${esc(l.color)}">${esc(l.name)}</span>`).join('')}</div></div>
     <div class="right"><div>${dot ? `<span class="dot ${dot}"></span> ` : ''}<span class="add">+${p.additions}</span> <span class="del">−${p.deletions}</span> · ${p.changedFiles} files</div>
@@ -302,6 +357,7 @@ function hl(code, lang) {
 /* ---------- PR detail ---------- */
 async function openPR(pr) {
   if (!pr) return;
+  markSeen([pr]);
   S.view = 'pr';
   S.d = { pr, files: [], cur: null, loading: true, filter: ls('ff', ''), hideViewed: false, prId: pr.id, hist: [] };
   closeDrawer(); mountPR(); updateFiles();
@@ -769,14 +825,16 @@ function openSettings() {
     <label id="st-row">Terminal for vim / Neovim / Helix<select id="st">${terms.map(([k, n]) => `<option value="${k}" ${c.terminal === k ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
     <label id="sc-row">Custom command <span class="muted">— use {file} {line} {dir}</span><input id="sc" value="${esc(c.custom)}" placeholder="e.g. emacsclient -n +{line} {file}" spellcheck="false"></label>
     <label>Where your repos live <span class="muted">— comma separated, searched 3 levels deep for a clone of the PR's repo</span><input id="sr" value="${esc(c.roots)}" spellcheck="false"></label>
+    <label>Refresh PR list <select id="sp">${[[30, 'every 30 seconds'], [60, 'every minute'], [120, 'every 2 minutes'], [300, 'every 5 minutes']].map(([v, n]) => `<option value="${v}" ${pollCfg().secs === v ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
+    <label style="flex-direction:row;align-items:center;gap:8px"><input type="checkbox" id="sn" ${pollCfg().notify ? 'checked' : ''}> Desktop notifications when a PR changes while LGTM is in the background</label>
     <div class="muted" style="font-size:12px">Files open at the first changed line. If your checkout isn't on the PR's commit, a separate git worktree of the PR is created for you (your working copy is never touched). With no local clone, a read-only snapshot of the file opens instead.</div>
     <div style="display:flex;gap:8px;justify-content:flex-end"><button id="s-cancel">Cancel <kbd>Esc</kbd></button><button id="s-save" class="on">Save</button></div></div>`;
   const sync = () => { const v = $('#se').value; $('#st-row').hidden = !TUI_EDITORS.includes(v); $('#sc-row').hidden = v !== 'custom'; };
   $('#se').onchange = sync; sync();
   $('#s-cancel').onclick = closeSettings;
   $('#s-save').onclick = () => {
-    const editor = $('#se').value; if (!editor) return toast('Choose an editor first');
-    lset('editor', { editor, terminal: $('#st').value, custom: $('#sc').value, roots: $('#sr').value }); closeSettings(); toast('Settings saved');
+    lset('editor', { editor: $('#se').value, terminal: $('#st').value, custom: $('#sc').value, roots: $('#sr').value });
+    lset('poll', { secs: +$('#sp').value, notify: $('#sn').checked }); schedulePoll(); closeSettings(); toast('Settings saved');
   };
   el.onmousedown = (e) => { if (e.target === el) closeSettings(); };
   $('#se').focus();
@@ -819,7 +877,7 @@ function toggleHelp(force) {
   if (!show) return;
   const R = (k, d) => `<div class="r"><span>${d}</span><span>${k.map((x) => `<kbd>${x}</kbd>`).join(' ')}</span></div>`;
   h.innerHTML = `<div class="box"><h3>Keyboard shortcuts</h3>
-   <div><h4>PR list</h4>${R(['j', '↓'], 'Next PR')}${R(['k', '↑'], 'Previous PR')}${R(['⏎', 'l'], 'Review files')}${R(['o'], 'Open on GitHub')}${R(['⇧M'], 'Smart merge')}${R(['⇧U'], 'Update branch (when behind)')}${R(['m'], 'Cycle merge filter: ready / needs update / auto / conflicts')}${R(['⇧X'], 'Close PR (no merge)')}${R(['/', '⌘F'], 'Focus filter')}${R(['⌘K / Ctrl+K'], 'Search PRs by title / description')}${R(['1', '–', '4'], 'Switch source')}${R(['s'], 'Cycle sort')}${R(['r'], 'Refresh')}${R(['d'], 'Toggle hide drafts')}${R(['x'], 'Clear filter')}</div>
+   <div><h4>PR list</h4>${R(['j', '↓'], 'Next PR')}${R(['k', '↑'], 'Previous PR')}${R(['⏎', 'l'], 'Review files')}${R(['o'], 'Open on GitHub')}${R(['⇧M'], 'Smart merge')}${R(['⇧U'], 'Update branch (when behind)')}${R(['m'], 'Cycle merge filter: ready / needs update / auto / conflicts')}${R(['⇧X'], 'Close PR (no merge)')}${R(['/', '⌘F'], 'Focus filter')}${R(['⌘K / Ctrl+K'], 'Search PRs by title / description')}${R(['1', '–', '4'], 'Switch source')}${R(['s'], 'Cycle sort')}${R(['r'], 'Refresh now (the list also refreshes itself)')}${R(['⇧Z'], 'Mark all updates as seen')}${R(['d'], 'Toggle hide drafts')}${R(['x'], 'Clear filter')}</div>
    <div><h4>File review</h4>${R(['j', '↓'], 'Next file')}${R(['k', '↑'], 'Previous file')}${R(['n', 'p'], 'Next / prev unviewed')}${R(['Space', '⏎', 'v'], 'Toggle viewed (+ next unviewed)')}${R(['⇧J', '⇧K'], 'Scroll diff a bit')}${R(['Ctrl+D', 'Ctrl+U'], 'Half page down / up')}${R(['u'], 'Undo last viewed change')}${R(['e'], 'Expand / collapse whole file')}${R(['⇧E'], 'Open file in your editor (vim / nvim / VS Code …)')}${R(['c'], 'Conversation (comments & reviews)')}${R([','], 'Settings (editor, terminal, repo folders)')}${R(['l'], 'Links found in the conversation')}${R(['g', 'G'], 'Top / bottom of diff')}${R(['h'], 'Hide viewed files')}${R(['t'], 'Hide / show test files')}${R(['⇧V'], 'Mark all shown as viewed')}${R(['/'], 'Filter files')}${R(['⌘F / Ctrl+F'], 'Find in PR (Enter/⇧Enter next/prev, Tab scope)')}${R(['Ctrl+G'], 'Next find match')}${R(['[', ']'], 'Prev / next PR')}${R(['⇧M'], 'Smart merge')}${R(['⇧U'], 'Update branch (when behind)')}${R(['m'], 'Cycle merge filter: ready / needs update / auto / conflicts')}${R(['⇧X'], 'Close PR (no merge)')}${R(['o'], 'Open PR files on GitHub')}${R(['Esc', 'b'], 'Back to list')}</div>
    <div style="grid-column:1/-1;color:var(--muted);margin-top:8px">File filter: <code>*.ts</code> globs, <code>src/</code> folders, <code>!*.lock</code> excludes, space/comma separated. Viewed state syncs with GitHub.</div></div>`;
 }
@@ -883,6 +941,7 @@ addEventListener('keydown', (e) => {
     else if (k >= '1' && k <= '4') setSource(SOURCES[+k - 1][0]);
     else if (k === 's') cycleSort();
     else if (k === 'r') loadPRs();
+    else if (k === 'Z') { markSeen(S.prs); updateList(); toast('Marked everything as seen'); }
     else if (k === 'd') toggleToken('-is:draft');
     else if (k === 'x') setQuery('');
     else return;
@@ -934,7 +993,7 @@ function render() {
     $('#tok').focus();
   }
 }
-function start() { S.view = 'list'; mountList(); updateList(); loadPRs(); }
+function start() { S.view = 'list'; mountList(); updateList(); loadPRs(); if (S.token !== 'demo') schedulePoll(); }
 $('#app').addEventListener('click', (e) => { listClick(e); prClick(e); if (e.target.closest('button')) e.target.closest('button').blur(); });
 (async () => {
   if (await native.isDemo()) { S.token = 'demo'; return start(); }

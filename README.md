@@ -14,6 +14,7 @@ GitHub shows you PRs one repo at a time. LGTM shows them **all at once** — acr
 - **One inbox for everything.** Review requested, yours, involving you, or everything in your orgs. Switch with `1`–`4`.
 - **Filter like a power user.** Type `repo:api author:maria label:bug -is:draft ci:fail`, or tap a quick chip. The repo sidebar shows live counts.
 - **See what matters at a glance.** Review status, CI, drafts, labels, size and age on every row.
+- **Stays fresh on its own.** The list refreshes in the background (every minute by default). PRs with news get a blue dot and say what changed: *New commits*, *2 new comments*, *CI passed*, *Approved*, *New PR*… Opening a PR marks it seen; `Shift+Z` marks everything seen. Optional desktop notifications ping you when a PR changes while LGTM is in the background.
 - **Know where each PR is on its way to merged.** Every row says *Ready to merge*, *Needs update*, *Auto-merge on*, *Conflicts* or *Blocked*. Press `m` to cycle through them, `Shift+M` to smart-merge, `Shift+U` to update a branch that's behind.
 
 ## Review one file at a time

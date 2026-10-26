@@ -137,3 +137,7 @@ body.mac .top { padding-left:84px; }
 #settings label { display:flex; flex-direction:column; gap:4px; font-weight:600; } #settings label[hidden] { display:none; }
 #settings label .muted { font-weight:400; font-size:12px; }
 #settings select { background:var(--bg); border:1px solid var(--border); border-radius:6px; padding:6px 8px; }
+
+.b-new { color:var(--accent); border-color:var(--accent); font-weight:600; }
+.ud { display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--accent); margin-right:6px; vertical-align:middle; }
+#settings label input[type=checkbox] { width:auto; }
