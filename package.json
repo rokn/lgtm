@@ -1,0 +1,46 @@
+{
+  "name": "lgtm",
+  "version": "0.1.0",
+  "description": "All your GitHub PRs in one fast, keyboard-driven view",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --mac --win --linux",
+    "dist:mac": "electron-builder --mac",
+    "dist:win": "electron-builder --win",
+    "dist:linux": "electron-builder --linux"
+  },
+  "build": {
+    "appId": "dev.lgtm.app",
+    "productName": "LGTM",
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    },
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Development"
+    }
+  },
+  "devDependencies": {
+    "@highlightjs/cdn-assets": "^11.12.0",
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.8"
+  }
+}
