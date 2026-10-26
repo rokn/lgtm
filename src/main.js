@@ -1,7 +1,11 @@
 const { app, BrowserWindow, ipcMain, safeStorage, shell, Menu, nativeTheme } = require('electron');
 const { execFile } = require('child_process');
 const fs = require('fs');
+const { openInEditor } = require('./editor');
 const path = require('path');
+
+// Demo runs get a throwaway profile so they never touch (or inherit) the real app's saved filters/token.
+if (process.env.LGTM_DEMO) app.setPath('userData', path.join(require('os').tmpdir(), 'lgtm-demo-profile-' + process.pid));
 
 const tokenFile = () => path.join(app.getPath('userData'), 'token.bin');
 
@@ -32,10 +36,11 @@ ipcMain.handle('token:set', (_e, token) => {
   fs.mkdirSync(path.dirname(tokenFile()), { recursive: true });
   fs.writeFileSync(tokenFile(), data, { mode: 0o600 });
 });
+ipcMain.handle('editor:open', (_e, o) => openInEditor(o, app.getPath('userData')));
 ipcMain.handle('demo', () => !!process.env.LGTM_DEMO);
 ipcMain.handle('token:clear', () => { try { fs.unlinkSync(tokenFile()); } catch {} });
 ipcMain.handle('open:external', (_e, url) => {
-  if (/^https:\/\/github\.com\//.test(url)) shell.openExternal(url);
+  if (/^https:\/\//.test(url)) shell.openExternal(url);
 });
 
 function createWindow() {
@@ -49,7 +54,7 @@ function createWindow() {
   win.loadFile(path.join(__dirname, 'index.html'));
   if (process.env.LGTM_SHOTS) win.webContents.once('did-finish-load', () => takeShots(win, process.env.LGTM_SHOTS));
   win.webContents.setWindowOpenHandler(({ url }) => {
-    if (/^https:\/\/github\.com\//.test(url)) shell.openExternal(url);
+    if (/^https:\/\//.test(url)) shell.openExternal(url);
     return { action: 'deny' };
   });
 }
@@ -57,12 +62,14 @@ function createWindow() {
 // Dev helper: LGTM_DEMO=1 LGTM_SHOTS=docs/screenshots npm start  -> renders the demo data and saves PNGs.
 async function takeShots(win, dir) {
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
-  const run = (js) => win.webContents.executeJavaScript(js);
+  const run = async (js) => { const r = await win.webContents.executeJavaScript(`(async () => { try { ${js}; } catch (e) { return 'ERR ' + e.stack; } })()`); if (typeof r === 'string' && r.startsWith('ERR')) console.error('shot step failed:', js.slice(0, 60), r); };
   const shot = async (name) => { win.setContentSize(1400, 900); await wait(600); fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(path.join(dir, name + '.png'), (await win.webContents.capturePage()).toPNG()); };
   win.setContentSize(1400, 900); await wait(1500);
   await run(`S.sel = 1; updateList()`); await shot('list');
   await run(`openPR(S.shown.find((p) => p.number === 1284))`); await wait(800);
   await run(`S.d.cur = 'internal/server/middleware.go'; updateFiles()`); await shot('review');
+  await run(`openDrawer('conv')`); await shot('comments');
+  await run(`openDrawer('links')`); await shot('links'); await run(`closeDrawer()`);
   await run(`openPalette(); const i = $('#pq'); i.value = 'idempotency'; i.dispatchEvent(new Event('input'))`); await shot('search');
   await run(`closePalette(); S.d.cur = 'internal/ratelimit/limiter.go'; updateFiles(); openFind(); $('#fq').value = 'bucket'; S.find.q = 'bucket'; updateFind(false)`); await shot('find');
   app.quit();

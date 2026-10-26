@@ -27,6 +27,22 @@ Open a PR and LGTM walks you through it **file by file** with a clean, syntax-hi
 - **Cut the noise.** Filter files by name or folder (`*.ts`, `src/`, `!*.lock`). Test files are hidden by default (`t` to show them).
 - **Need context?** `e` expands the whole file around your diff.
 
+## Read the conversation without leaving the diff
+
+<p align="center"><img src="docs/screenshots/comments.png" alt="Comments and reviews next to the diff" width="900"></p>
+
+Press `c` to slide in the whole conversation: description, comments, reviews and inline threads (with resolved / outdated tags). Click a thread's file path to jump straight to it. Files with open threads get a 💬 in the file list.
+
+### Smart Links
+
+<p align="center"><img src="docs/screenshots/links.png" alt="Links gathered from the PR conversation" width="900"></p>
+
+Press `l` and LGTM collects **every link** from the description, comments, reviews and threads, de-duplicates them, and sorts them into tickets (Linear, Jira…), PRs & issues, designs (Figma…), docs (Notion, Google Docs…), code, CI & deploys, and chat. `Enter` opens one, `y` copies it.
+
+## Jump into your editor
+
+`Shift+E` opens the current file **at the first changed line** in the editor you picked in settings (`,`): VS Code, Cursor, Zed, Sublime, IntelliJ, a custom command, or **Vim / Neovim / Helix** in the terminal of your choice (Terminal.app, iTerm2, Ghostty, kitty, Alacritty, WezTerm, GNOME Terminal, Windows Terminal…). LGTM finds your local clone; if it isn't on the PR's commit, it opens a separate git worktree of the PR so your working copy is never touched. No clone? You get a read-only snapshot.
+
 ## Find anything, instantly
 
 <p align="center"><img src="docs/screenshots/find.png" alt="Find across all files in the PR" width="900"></p>
@@ -50,6 +66,7 @@ Open a PR and LGTM walks you through it **file by file** with a clean, syntax-hi
 | Open | `Enter` | `Space` / `Enter` marks viewed + next |
 | Search | `/` filter · `Cmd/Ctrl+K` PRs | `Cmd/Ctrl+F` find · `/` filter files |
 | Scroll | `Ctrl+D` `Ctrl+U` | `Ctrl+D` `Ctrl+U` |
+| Panels | | `c` comments · `l` links · `Shift+E` editor · `,` settings |
 | Actions | `Shift+M` merge · `Shift+U` update branch · `m` merge filter · `Shift+X` close · `o` GitHub | same · `[` `]` prev/next PR · `Esc` back |
 
 Press `?` in the app for the full list.

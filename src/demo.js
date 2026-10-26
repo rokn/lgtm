@@ -169,6 +169,29 @@ const DEMO = (() => {
 +golang.org/x/time v0.5.0/go.mod h1:3BpzKBy/shNhVucY/MWOyx10tF3SFh9QdLuxbVysPQM=
  github.com/lib/pq v1.10.9 h1:YXG7RB+JIjhP29X+OtkiDnYaXQwpS4JEWq7dtCCRUEw=`),
   ];
+
+  const u = (login, c) => ({ login, avatarUrl: av(c, login[0].toUpperCase()) });
+  const conv = () => ({
+    body: 'Adds a per-key **token bucket** limiter in front of the public API.\n\n- Spec: https://www.notion.so/acme/API-rate-limits-3f9a1c\n- Ticket: [ENG-2291](https://linear.app/acme/issue/ENG-2291/rate-limit-public-api)\n- Designs for the 429 page: https://www.figma.com/file/Xk29s/api-errors\n\nFollow-up for per-plan limits is tracked in https://github.com/acme/api/issues/1301.',
+    createdAt: ago(22), author: u('maria', '#8250df'),
+    comments: { nodes: [
+      { author: u('vercel[bot]', '#57606a'), body: '✅ Preview deployed: https://acme-api-docs-git-rate-limit.vercel.app', createdAt: ago(21), url: '' },
+      { author: u('tomas', '#cf222e'), body: 'Nice! Did you consider **sliding window** instead? There is a good comparison in https://blog.cloudflare.com/counting-things-a-lot-of-different-things/ \nAlso `X-Api-Key` might be empty for browsers, see the thread in https://acme.slack.com/archives/C024BE91L/p1699999999.', createdAt: ago(10), url: '' },
+      { author: u('maria', '#8250df'), body: 'Token bucket is cheaper per key and the burst behaviour is what we want for the dashboard. Added a note to the docs. CI run: https://github.com/acme/api/actions/runs/8123456789', createdAt: ago(6), url: '' },
+    ] },
+    reviews: { nodes: [
+      { author: u('priya', '#1a7f37'), state: 'CHANGES_REQUESTED', body: 'Looks good overall. Two things before this can go in: the limiter map never evicts idle keys, and we should have a test for refill.', createdAt: ago(8), url: '' },
+      { author: u('tomas', '#cf222e'), state: 'APPROVED', body: '', createdAt: ago(3), url: '' },
+    ] },
+    reviewThreads: { nodes: [
+      { isResolved: false, isOutdated: false, path: 'internal/ratelimit/limiter.go', line: 13, originalLine: 13, comments: { nodes: [
+        { author: u('priya', '#1a7f37'), body: 'This map grows forever. Can we evict buckets that have been idle for a while?', createdAt: ago(8), url: '' },
+        { author: u('maria', '#8250df'), body: 'Good catch, will add a janitor goroutine. Draft: https://github.com/acme/api/pull/1290', createdAt: ago(7), url: '' } ] } },
+      { isResolved: true, isOutdated: false, path: 'internal/server/middleware.go', line: 35, originalLine: 35, comments: { nodes: [
+        { author: u('tomas', '#cf222e'), body: 'Should we trust `X-Forwarded-For` here?', createdAt: ago(9), url: '' },
+        { author: u('maria', '#8250df'), body: 'No: we only read `RemoteAddr`, the proxy rewrites it already.', createdAt: ago(9), url: '' } ] } },
+    ] },
+  });
   const viewed = new Set(['go.sum']);
-  return { prs, files: () => files().map((f) => ({ ...f, viewed: viewed.has(f.filename), stale: false })) };
+  return { prs, conv, files: () => files().map((f) => ({ ...f, viewed: viewed.has(f.filename), stale: false })) };
 })();

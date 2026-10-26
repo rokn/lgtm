@@ -6,6 +6,7 @@ const lset = (k, v) => { try { localStorage.setItem('sp.' + k, JSON.stringify(v)
 if (native.platform === 'darwin') document.body.classList.add('mac');
 
 const S = {
+  drawer: { open: false, tab: 'conv', sel: 0 },
   hideTests: ls('hideTests', true),
   token: null, view: 'login', prs: [], sel: 0, loading: false,
   source: ls('source', 'review'), q: ls('q', ''), sort: ls('sort', 'updated'),
@@ -139,7 +140,7 @@ function mountList() {
   <div class="top">
     <div class="seg">${SOURCES.map(([k, l], i) => `<button data-src="${k}" title="${i + 1}">${l}</button>`).join('')}</div>
     <div class="grow"><input id="q" placeholder="Filter…  repo:foo  author:bar  label:bug  merge:ready  -is:draft  ci:fail   ( / )" value="${esc(S.q)}"></div>
-    <button id="sortb"></button><button id="refresh" title="r">⟳ Refresh</button><button id="help-b">?</button>
+    <button id="sortb"></button><button id="refresh" title="r">⟳ Refresh</button><button id="settings-b" title=",">⚙</button><button id="help-b">?</button>
   </div>
   <div class="chips" id="chips"></div>
   <div class="body"><div class="side" id="side"></div><div class="main" id="prs"></div></div>
@@ -147,7 +148,7 @@ function mountList() {
   $('#q').addEventListener('input', (e) => { S.q = e.target.value; lset('q', S.q); S.sel = 0; updateList(); });
 }
 function listClick(e) {
-  const t = e.target.closest('[data-src],[data-chip],[data-repo],[data-pr],#refresh,#sortb,#help-b'); if (!t || S.view !== 'list') return;
+  const t = e.target.closest('[data-src],[data-chip],[data-repo],[data-pr],#refresh,#sortb,#help-b,#settings-b'); if (!t || S.view !== 'list') return;
   if (t.dataset.src) { setSource(t.dataset.src); }
   else if (t.dataset.chip) toggleToken(t.dataset.chip);
   else if (t.dataset.repo) toggleRepo(t.dataset.repo);
@@ -155,6 +156,7 @@ function listClick(e) {
   else if (t.id === 'refresh') loadPRs();
   else if (t.id === 'sortb') cycleSort();
   else if (t.id === 'help-b') toggleHelp();
+  else if (t.id === 'settings-b') openSettings();
 }
 function setSource(k) { S.source = k; lset('source', k); S.prs = []; loadPRs(); }
 function cycleSort() { S.sort = SORTS[(SORTS.indexOf(S.sort) + 1) % SORTS.length]; lset('sort', S.sort); updateList(); }
@@ -302,8 +304,9 @@ async function openPR(pr) {
   if (!pr) return;
   S.view = 'pr';
   S.d = { pr, files: [], cur: null, loading: true, filter: ls('ff', ''), hideViewed: false, prId: pr.id, hist: [] };
-  mountPR(); updateFiles();
-  if (S.token === 'demo') { S.d.files = DEMO.files(); S.d.loading = false; return updateFiles(); }
+  closeDrawer(); mountPR(); updateFiles();
+  if (S.token === 'demo') { S.d.files = DEMO.files(); S.d.loading = false; S.d.conv = DEMO.conv(); afterConv(); return updateFiles(); }
+  loadConv(pr);
   try {
     const nwo = pr.repository.nameWithOwner;
     const restFiles = (async () => { const out = []; for (let p = 1; p <= 30; p++) { const r = await rest(`/repos/${nwo}/pulls/${pr.number}/files?per_page=100&page=${p}`); out.push(...r); if (r.length < 100) break; } return out; })();
@@ -329,7 +332,7 @@ function mountPR() {
   $('#app').innerHTML = `
   <div class="top"><button id="back" title="Esc">← Back</button>
     <div class="ptitle">${esc(p.repository.nameWithOwner)} <span style="color:var(--muted)">#${p.number}</span> ${esc(p.title)}</div>
-    <button id="prev">[ prev PR</button><button id="next">next PR ]</button><button id="closepr" title="X">Close PR <kbd>⇧X</kbd></button><button id="merge" title="M">Smart merge <kbd>M</kbd></button><button id="gh">Open on GitHub</button><button id="help-b">?</button></div>
+    <button id="prev">[ prev PR</button><button id="next">next PR ]</button><button id="cbtn" title="c">💬 Comments <kbd>c</kbd></button><button id="lbtn" title="l">🔗 Links <kbd>l</kbd></button><button id="closepr" title="X">Close PR <kbd>⇧X</kbd></button><button id="merge" title="M">Smart merge <kbd>M</kbd></button><button id="gh">Open on GitHub</button><button id="help-b">?</button></div>
   <div class="body">
     <div class="files"><div class="fhead">
       <input id="ff" placeholder="Filter files: *.ts  src/  !*.lock  ( / )" value="${esc(S.d.filter)}">
@@ -339,10 +342,11 @@ function mountPR() {
         <label style="cursor:pointer"><input type="checkbox" id="ht" style="vertical-align:middle"> hide tests <kbd>t</kbd></label>
         <label style="cursor:pointer"><input type="checkbox" id="hv" style="vertical-align:middle"> hide viewed <kbd>h</kbd></label></div>
     </div><div class="flist" id="flist"></div></div>
+    <div id="drawer" hidden></div>
     <div class="diffwrap"><div class="dhead" id="dhead"></div>
       <div id="findbar" hidden><input id="fq" placeholder="Find in PR…" spellcheck="false"><span id="fcount"></span><button id="fscope" title="Tab"></button><button id="fprev" title="Shift+Enter">↑</button><button id="fnext" title="Enter">↓</button><button id="fclose" title="Esc">✕</button></div><div class="diff" id="diff"></div></div>
   </div>
-  <div class="foot"><span><kbd>j</kbd><kbd>k</kbd> next/prev file</span><span><kbd>Space</kbd>/<kbd>⏎</kbd> viewed + next</span><span><kbd>n</kbd><kbd>p</kbd> next/prev unviewed</span><span><kbd>Ctrl+D</kbd><kbd>Ctrl+U</kbd> scroll</span><span><kbd>u</kbd> undo</span><span><kbd>e</kbd> expand file</span><span><kbd>/</kbd> filter</span><span><kbd>[</kbd><kbd>]</kbd> other PR</span><span><kbd>Esc</kbd> back</span></div>`;
+  <div class="foot"><span><kbd>j</kbd><kbd>k</kbd> next/prev file</span><span><kbd>Space</kbd>/<kbd>⏎</kbd> viewed + next</span><span><kbd>n</kbd><kbd>p</kbd> next/prev unviewed</span><span><kbd>Ctrl+D</kbd><kbd>Ctrl+U</kbd> scroll</span><span><kbd>u</kbd> undo</span><span><kbd>e</kbd> expand file</span><span><kbd>⇧E</kbd> editor</span><span><kbd>c</kbd> comments</span><span><kbd>l</kbd> links</span><span><kbd>/</kbd> filter</span><span><kbd>[</kbd><kbd>]</kbd> other PR</span><span><kbd>Esc</kbd> back</span></div>`;
   $('#ff').addEventListener('input', (e) => { S.d.filter = e.target.value; lset('ff', S.d.filter); updateFiles(); });
   $('#fq').addEventListener('input', (e) => { S.find.q = e.target.value; updateFind(false); });
   $('#ht').checked = S.hideTests;
@@ -351,13 +355,20 @@ function mountPR() {
 }
 function prClick(e) {
   if (S.view !== 'pr') return;
-  const t = e.target.closest('[data-f],[data-dir],#back,#prev,#next,#gh,#merge,#eb,#closepr,#fscope,#fprev,#fnext,#fclose,#help-b,#vb,[data-chk]'); if (!t) return;
+  const t = e.target.closest('[data-f],[data-dir],#back,#prev,#next,#gh,#merge,#eb,#edb,#closepr,#cbtn,#lbtn,[data-tab],[data-url],[data-li],[data-jump],#fscope,#fprev,#fnext,#fclose,#help-b,#vb,[data-chk]'); if (!t) return;
   if (t.dataset.chk != null) { e.stopPropagation(); const f = visibleFiles()[+t.dataset.chk]; if (f) setViewed(f, !f.viewed); return; }
   if (t.dataset.f != null) { S.d.cur = visibleFiles()[+t.dataset.f]?.filename; updateFiles(); }
   else if (t.dataset.dir) { S.d.filter = e.shiftKey ? `${S.d.filter} !${t.dataset.dir}`.trim() : t.dataset.dir; $('#ff').value = S.d.filter; lset('ff', S.d.filter); updateFiles(); }
   else if (t.id === 'back') back();
   else if (t.id === 'prev') otherPR(-1);
   else if (t.id === 'next') otherPR(1);
+  else if (t.id === 'cbtn') S.drawer.open && S.drawer.tab === 'conv' ? closeDrawer() : openDrawer('conv');
+  else if (t.id === 'lbtn') S.drawer.open && S.drawer.tab === 'links' ? closeDrawer() : openDrawer('links');
+  else if (t.dataset.tab) { S.drawer.tab = t.dataset.tab; S.drawer.sel = 0; renderDrawer(); }
+  else if (t.dataset.url) { e.preventDefault(); ghOpen(t.dataset.url); }
+  else if (t.dataset.li != null) { S.drawer.sel = +t.dataset.li; ghOpen(S.d.links[+t.dataset.li].url); renderDrawer(); }
+  else if (t.dataset.jump) { const f = S.d.files.find((x) => x.filename === t.dataset.jump); if (!f) return toast('File not in this PR'); if (!visibleFiles().includes(f)) { S.d.filter = ''; $('#ff').value = ''; S.hideTests = false; $('#ht').checked = false; } S.d.cur = f.filename; closeDrawer(); updateFiles(); }
+  else if (t.id === 'edb') openInEditor();
   else if (t.id === 'eb') toggleExpand();
   else if (t.id === 'fscope') toggleScope();
   else if (t.id === 'fprev') stepFind(-1);
@@ -369,7 +380,7 @@ function prClick(e) {
   else if (t.id === 'help-b') toggleHelp();
   else if (t.id === 'vb') { const f = curFile(); if (f) toggleViewedAdvance(f); }
 }
-function back() { S.view = 'list'; S.d = null; mountList(); updateList(); }
+function back() { closeDrawer(); S.view = 'list'; S.d = null; mountList(); updateList(); }
 function otherPR(dir) {
   const i = S.shown.findIndex((p) => p.id === S.d.pr.id) + dir;
   if (i < 0 || i >= S.shown.length) return toast(dir > 0 ? 'Last PR in list' : 'First PR in list');
@@ -407,7 +418,7 @@ function updateFiles() {
     const slash = f.filename.lastIndexOf('/'); const dir = f.filename.slice(0, slash + 1), base = f.filename.slice(slash + 1);
     return `<div class="f ${f.filename === d.cur ? 'sel' : ''} ${f.viewed ? 'viewed' : ''}" data-f="${i}">
       <span class="chk" data-chk="${i}" title="Mark viewed">${f.viewed ? '✓' : ''}</span><span class="st st-${f.status}">${{ added: 'A', removed: 'D', renamed: 'R', modified: 'M' }[f.status] || 'M'}</span>
-      <span class="name" title="${esc(f.filename)}"><bdi><span class="dir">${esc(dir)}</span>${esc(base)}${f.stale ? ' ↻' : ''}</bdi></span>
+      <span class="name" title="${esc(f.filename)}"><bdi><span class="dir">${esc(dir)}</span>${esc(base)}${f.stale ? ' ↻' : ''}</bdi></span>${d.threadCounts?.[f.filename] ? `<span class="tcnt" title="open comment threads">💬${d.threadCounts[f.filename]}</span>` : ''}
       <span class="nums"><span class="add">+${f.additions}</span> <span class="del">−${f.deletions}</span></span></div>`;
   }).join('') : '<div class="empty">No files match.</div>';
   $('#flist .sel')?.scrollIntoView({ block: 'nearest' });
@@ -421,6 +432,7 @@ function renderDiffInner() {
   const idx = visibleFiles().indexOf(f);
   head.innerHTML = `<div class="path" title="${esc(f.filename)}">${f.previous_filename ? esc(f.previous_filename) + ' → ' : ''}${esc(f.filename)}</div>
     <span><span class="add">+${f.additions}</span> <span class="del">−${f.deletions}</span></span><span style="color:var(--muted)">${idx + 1}/${visibleFiles().length}</span>
+    <button id="edb" title="Shift+E">Open in editor <kbd>⇧E</kbd></button>
     <button id="eb" class="${f.expanded ? 'on' : ''}">${f.expanded ? 'Collapse' : 'Expand file'} <kbd>e</kbd></button>
     <button id="vb" class="${f.viewed ? 'on' : ''}">${f.viewed ? '✓ Viewed' : 'Mark viewed'} <kbd>v</kbd></button>`;
   const key = f.filename + '|' + !!f.expanded;
@@ -611,6 +623,196 @@ function pickPalette(i, external) {
   openPR(p);
 }
 
+
+/* ---------- conversation + smart links ---------- */
+const CONV_Q = `query($o:String!,$n:String!,$num:Int!){repository(owner:$o,name:$n){pullRequest(number:$num){ body createdAt author{login avatarUrl(size:40)}
+  comments(first:100){nodes{author{login avatarUrl(size:40)} body createdAt url}}
+  reviews(first:100){nodes{author{login avatarUrl(size:40)} state body createdAt url}}
+  reviewThreads(first:100){nodes{isResolved isOutdated path line originalLine comments(first:50){nodes{author{login avatarUrl(size:40)} body createdAt url}}}}}}}`;
+async function loadConv(pr) {
+  try {
+    const [owner, name] = pr.repository.nameWithOwner.split('/');
+    const d = (await gql(CONV_Q, { o: owner, n: name, num: pr.number })).repository.pullRequest;
+    if (S.d?.pr !== pr) return;
+    S.d.conv = d;
+  } catch (e) { return toast('Could not load comments: ' + e.message); }
+  afterConv();
+}
+function md(src) {
+  const blocks = [];
+  let t = String(src || '').replace(/<!--[\s\S]*?-->/g, '').replace(/```[^\n]*\n([\s\S]*?)```/g, (_, c) => { blocks.push(c); return `\u0000${blocks.length - 1}\u0000`; });
+  t = esc(t).replace(/`([^`\n]+)`/g, '<code>$1</code>')
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="#" data-url="$2">$1</a>')
+    .replace(/(^|[\s(])(https?:\/\/[^\s<)]+)/g, (m, pre, u) => `${pre}<a href="#" data-url="${u.replace(/[.,;:!?]+$/, '')}">${u}</a>`)
+    .replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>').replace(/\n/g, '<br>');
+  return t.replace(/\u0000(\d+)\u0000/g, (_, i) => `<pre>${esc(blocks[+i])}</pre>`);
+}
+function classify(u) {
+  let url; try { url = new URL(u); } catch { return { cat: 'Other', name: u }; }
+  const h = url.hostname.replace(/^www\./, ''), path = url.pathname; let m;
+  if (h === 'github.com') {
+    if ((m = path.match(/^\/([^/]+\/[^/]+)\/(pull|issues|discussions)\/(\d+)/))) return { cat: 'PRs & issues', name: `${m[1]}#${m[3]}` };
+    if (/\/actions\//.test(path)) return { cat: 'CI & deploys', name: 'GitHub Actions run' };
+    if ((m = path.match(/^\/([^/]+\/[^/]+)\/(blob|tree|commit|compare)\/(.+)/))) return { cat: 'Code', name: `${m[1]}: ${decodeURIComponent(m[3]).slice(0, 60)}` };
+  }
+  if (h === 'linear.app' && (m = path.match(/\/issue\/([A-Z]+-\d+)/i))) return { cat: 'Tickets', name: m[1].toUpperCase() };
+  if ((/atlassian\.net$/.test(h) || /jira/.test(h)) && (m = path.match(/\/browse\/([A-Z][A-Z0-9]+-\d+)/i))) return { cat: 'Tickets', name: m[1].toUpperCase() };
+  if (/shortcut\.com$|clubhouse\.io$|asana\.com$|trello\.com$/.test(h)) return { cat: 'Tickets', name: h + path.slice(0, 40) };
+  if (/figma\.com$|miro\.com$|excalidraw\.com$|framer\.com$/.test(h)) return { cat: 'Design', name: h.split('.')[0][0].toUpperCase() + h.split('.')[0].slice(1) + ' file' };
+  if (/notion\.(so|site)$|docs\.google\.com$|drive\.google\.com$|confluence|coda\.io$|dropbox\.com$/.test(h) || (/atlassian\.net$/.test(h) && /\/wiki\//.test(path))) return { cat: 'Docs', name: h + path.slice(0, 40) };
+  if (/slack\.com$|discord\.com$/.test(h)) return { cat: 'Chat', name: h.split('.')[0] + ' thread' };
+  if (/vercel\.app$|netlify\.app$|circleci\.com$|buildkite\.com$|sentry\.io$|datadoghq\.com$|pages\.dev$|onrender\.com$|herokuapp\.com$/.test(h)) return { cat: 'CI & deploys', name: h };
+  return { cat: 'Other', name: h + (path.length > 1 ? path.slice(0, 50) : '') };
+}
+const LINK_CATS = ['Tickets', 'PRs & issues', 'Design', 'Docs', 'Code', 'CI & deploys', 'Chat', 'Other'];
+const CAT_ICON = { Tickets: '🎫', 'PRs & issues': '🔀', Design: '🎨', Docs: '📄', Code: '</>', 'CI & deploys': '🚀', Chat: '💬', Other: '🔗' };
+function extractLinks(sources, selfUrl) {
+  const map = new Map();
+  const add = (url, label, user) => {
+    url = url.replace(/[.,;:!?)]+$/, ''); if (!/^https?:\/\//i.test(url) || url.replace(/\/(files|commits).*$/, '') === selfUrl) return;
+    let e = map.get(url); if (!e) { e = { url, label: '', users: new Set(), count: 0 }; map.set(url, e); }
+    if (label && !e.label) e.label = label; e.users.add(user); e.count++;
+  };
+  for (const { user, text } of sources) {
+    const t = String(text || '').replace(/<!--[\s\S]*?-->/g, '').replace(/!\[[^\]]*\]\([^)]*\)/g, ' ').replace(/<img[^>]*>/g, ' ');
+    t.replace(/\[([^\]]*)\]\((https?:\/\/[^)\s]+)\)/g, (m, l, u) => { add(u, l, user); return m; });
+    t.replace(/<a\s[^>]*href="(https?:\/\/[^"]+)"/g, (m, u) => { add(u, '', user); return m; });
+    t.replace(/\[([^\]]*)\]\((https?:\/\/[^)\s]+)\)/g, ' ').replace(/<a\s[^>]*>/g, ' ')
+      .replace(/https?:\/\/[^\s<>"'`\]]+/g, (u) => { add(u, '', user); return u; });
+  }
+  return [...map.values()].map((e) => ({ ...e, ...classify(e.url), users: [...e.users] }))
+    .sort((a, b) => LINK_CATS.indexOf(a.cat) - LINK_CATS.indexOf(b.cat) || b.count - a.count);
+}
+function afterConv() {
+  const d = S.d; const c = d.conv; if (!c) return;
+  const items = [{ kind: 'desc', user: c.author?.login || 'ghost', avatar: c.author?.avatarUrl, at: c.createdAt, body: c.body }];
+  const sources = [{ user: items[0].user, text: c.body }]; d.threadCounts = {}; d.total = 0;
+  c.comments.nodes.forEach((x) => { items.push({ kind: 'comment', user: x.author?.login || 'ghost', avatar: x.author?.avatarUrl, at: x.createdAt, body: x.body, url: x.url }); sources.push({ user: x.author?.login || 'ghost', text: x.body }); d.total++; });
+  c.reviews.nodes.forEach((x) => { if (x.state === 'PENDING' || (x.state === 'COMMENTED' && !x.body)) return; items.push({ kind: 'review', state: x.state, user: x.author?.login || 'ghost', avatar: x.author?.avatarUrl, at: x.createdAt, body: x.body, url: x.url }); sources.push({ user: x.author?.login || 'ghost', text: x.body }); if (x.body) d.total++; });
+  c.reviewThreads.nodes.forEach((t) => {
+    if (!t.comments.nodes.length) return;
+    d.threadCounts[t.path] = (d.threadCounts[t.path] || 0) + (t.isResolved ? 0 : 1);
+    items.push({ kind: 'thread', t, at: t.comments.nodes[0].createdAt });
+    t.comments.nodes.forEach((x) => { sources.push({ user: x.author?.login || 'ghost', text: x.body }); d.total++; });
+  });
+  items.sort((a, b) => new Date(a.at) - new Date(b.at));
+  d.items = items; d.links = extractLinks(sources, d.pr.url);
+  updateConvButtons(); updateFiles(); if (S.drawer?.open) renderDrawer();
+}
+function updateConvButtons() {
+  const d = S.d; if (!d || !$('#cbtn')) return;
+  $('#cbtn').innerHTML = `💬 Comments${d.items ? ` <span class="cnt">${d.total}</span>` : ''} <kbd>c</kbd>`;
+  $('#lbtn').innerHTML = `🔗 Links${d.links ? ` <span class="cnt">${d.links.length}</span>` : ''} <kbd>l</kbd>`;
+}
+function openDrawer(tab) { S.drawer = { open: true, tab, sel: 0 }; renderDrawer(); }
+function closeDrawer() { S.drawer = { open: false, tab: 'conv', sel: 0 }; const el = $('#drawer'); if (el) el.hidden = true; }
+function renderDrawer() {
+  const dr = S.drawer, d = S.d, el = $('#drawer'); if (!el || !dr?.open) return;
+  el.hidden = false;
+  const who = (u, av) => `<img src="${esc(av || '')}" alt=""><b>${esc(u)}</b>`;
+  let body;
+  if (!d.conv) body = '<div class="spin">Loading…</div>';
+  else if (dr.tab === 'conv') {
+    body = d.items.map((it) => {
+      if (it.kind === 'thread') {
+        const t = it.t;
+        return `<div class="cm thread"><div class="ch"><span class="tp" data-jump="${esc(t.path)}" title="Jump to file">${esc(t.path)}${t.line || t.originalLine ? ':' + (t.line || t.originalLine) : ''}</span>${t.isResolved ? '<span class="badge b-ok">Resolved</span>' : ''}${t.isOutdated ? '<span class="badge b-draft">Outdated</span>' : ''}</div>
+          ${t.comments.nodes.map((x) => `<div class="tc"><div class="ch">${who(x.author?.login || 'ghost', x.author?.avatarUrl)}<span class="muted">${ago(x.createdAt)} ago</span></div><div class="cb">${md(x.body)}</div></div>`).join('')}</div>`;
+      }
+      const label = { desc: 'opened this PR', comment: 'commented', review: { APPROVED: 'approved', CHANGES_REQUESTED: 'requested changes', COMMENTED: 'reviewed', DISMISSED: 'review dismissed' }[it.state] || 'reviewed' }[it.kind];
+      const badge = it.state === 'APPROVED' ? 'b-ok' : it.state === 'CHANGES_REQUESTED' ? 'b-bad' : '';
+      return `<div class="cm"><div class="ch">${who(it.user, it.avatar)}<span class="muted">${badge ? `<span class="badge ${badge}">${label}</span>` : label} · ${ago(it.at)} ago</span></div>${it.body ? `<div class="cb">${md(it.body)}</div>` : ''}</div>`;
+    }).join('') || '<div class="empty">No comments yet</div>';
+  } else {
+    if (!d.links.length) body = '<div class="empty">No links found in the description or comments</div>';
+    else {
+      let last = ''; body = d.links.map((l, i) => {
+        const head = l.cat !== last ? `<h4>${CAT_ICON[l.cat]} ${l.cat}</h4>` : ''; last = l.cat;
+        return `${head}<div class="lk ${i === dr.sel ? 'sel' : ''}" data-li="${i}"><div class="lt"><div class="ln">${esc(l.label || l.name)}</div><div class="lu">${esc(l.url)}</div></div><div class="lm">${l.users.map((u) => '@' + esc(u)).join(' ')}${l.count > 1 ? ` · ×${l.count}` : ''}</div></div>`;
+      }).join('');
+    }
+  }
+  el.innerHTML = `<div class="dtabs"><button data-tab="conv" class="${dr.tab === 'conv' ? 'on' : ''}">💬 Conversation${d.items ? ` (${d.total})` : ''}</button><button data-tab="links" class="${dr.tab === 'links' ? 'on' : ''}">🔗 Links${d.links ? ` (${d.links.length})` : ''}</button></div><div class="dbody" id="dbody">${body}</div><div class="dfoot">${dr.tab === 'links' ? '<kbd>j</kbd><kbd>k</kbd> select · <kbd>⏎</kbd> open · <kbd>y</kbd> copy · ' : '<kbd>j</kbd><kbd>k</kbd> scroll · '}<kbd>Tab</kbd> switch · <kbd>Esc</kbd> close</div>`;
+  $('#drawer .lk.sel')?.scrollIntoView({ block: 'nearest' });
+}
+function drawerKey(e) {
+  const dr = S.drawer, k = e.key; e.preventDefault();
+  if (k === 'Escape') return closeDrawer();
+  if (k === 'c') return dr.tab === 'conv' ? closeDrawer() : (dr.tab = 'conv', renderDrawer());
+  if (k === 'l') return dr.tab === 'links' ? closeDrawer() : (dr.tab = 'links', dr.sel = 0, renderDrawer());
+  if (k === 'Tab') { dr.tab = dr.tab === 'conv' ? 'links' : 'conv'; dr.sel = 0; return renderDrawer(); }
+  if (dr.tab === 'links' && S.d.links?.length) {
+    const n = S.d.links.length;
+    if (k === 'j' || k === 'ArrowDown') { dr.sel = Math.min(n - 1, dr.sel + 1); renderDrawer(); }
+    else if (k === 'k' || k === 'ArrowUp') { dr.sel = Math.max(0, dr.sel - 1); renderDrawer(); }
+    else if (k === 'Enter' || k === 'o') ghOpen(S.d.links[dr.sel].url);
+    else if (k === 'y') { navigator.clipboard?.writeText(S.d.links[dr.sel].url).then(() => toast('Link copied'), () => toast('Could not copy')); }
+  } else if (k === 'j' || k === 'ArrowDown') $('#dbody').scrollBy({ top: 90, behavior: 'smooth' });
+  else if (k === 'k' || k === 'ArrowUp') $('#dbody').scrollBy({ top: -90, behavior: 'smooth' });
+}
+
+
+/* ---------- open in editor + settings ---------- */
+const EDITORS = [['code', 'VS Code'], ['cursor', 'Cursor'], ['zed', 'Zed'], ['subl', 'Sublime Text'], ['idea', 'IntelliJ IDEA'], ['nvim', 'Neovim (in a terminal)'], ['vim', 'Vim (in a terminal)'], ['hx', 'Helix (in a terminal)'], ['custom', 'Custom command…']];
+const TUI_EDITORS = ['vim', 'nvim', 'hx'];
+const TERMS = {
+  darwin: [['default', 'Terminal.app'], ['iterm', 'iTerm2'], ['ghostty', 'Ghostty'], ['kitty', 'kitty'], ['alacritty', 'Alacritty'], ['wezterm', 'WezTerm']],
+  win32: [['default', 'Windows Terminal / cmd']],
+  linux: [['default', 'System default'], ['gnome', 'GNOME Terminal'], ['konsole', 'Konsole'], ['kitty', 'kitty'], ['alacritty', 'Alacritty'], ['wezterm', 'WezTerm'], ['xterm', 'xterm']],
+};
+const editorCfg = () => ({ editor: '', terminal: 'default', custom: '', roots: '~/programming, ~/code, ~/src, ~/dev, ~/projects, ~/work, ~/Developer, ~/github', ...ls('editor', {}) });
+function openSettings() {
+  const c = editorCfg(); const el = $('#settings'); S.settingsOpen = true; el.hidden = false;
+  const terms = TERMS[native.platform] || TERMS.linux;
+  el.innerHTML = `<div class="box"><h3 style="margin:0 0 4px">Settings</h3>
+    <label>Editor<select id="se">${!c.editor ? '<option value="">Choose…</option>' : ''}${EDITORS.map(([k, n]) => `<option value="${k}" ${c.editor === k ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
+    <label id="st-row">Terminal for vim / Neovim / Helix<select id="st">${terms.map(([k, n]) => `<option value="${k}" ${c.terminal === k ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
+    <label id="sc-row">Custom command <span class="muted">— use {file} {line} {dir}</span><input id="sc" value="${esc(c.custom)}" placeholder="e.g. emacsclient -n +{line} {file}" spellcheck="false"></label>
+    <label>Where your repos live <span class="muted">— comma separated, searched 3 levels deep for a clone of the PR's repo</span><input id="sr" value="${esc(c.roots)}" spellcheck="false"></label>
+    <div class="muted" style="font-size:12px">Files open at the first changed line. If your checkout isn't on the PR's commit, a separate git worktree of the PR is created for you (your working copy is never touched). With no local clone, a read-only snapshot of the file opens instead.</div>
+    <div style="display:flex;gap:8px;justify-content:flex-end"><button id="s-cancel">Cancel <kbd>Esc</kbd></button><button id="s-save" class="on">Save</button></div></div>`;
+  const sync = () => { const v = $('#se').value; $('#st-row').hidden = !TUI_EDITORS.includes(v); $('#sc-row').hidden = v !== 'custom'; };
+  $('#se').onchange = sync; sync();
+  $('#s-cancel').onclick = closeSettings;
+  $('#s-save').onclick = () => {
+    const editor = $('#se').value; if (!editor) return toast('Choose an editor first');
+    lset('editor', { editor, terminal: $('#st').value, custom: $('#sc').value, roots: $('#sr').value }); closeSettings(); toast('Settings saved');
+  };
+  el.onmousedown = (e) => { if (e.target === el) closeSettings(); };
+  $('#se').focus();
+}
+function closeSettings() { S.settingsOpen = false; const el = $('#settings'); el.hidden = true; el.innerHTML = ''; }
+
+function firstChangedLine(f) {
+  let n = 1;
+  for (const l of (f.patch || '').split('\n')) {
+    const h = /^@@ -\d+(?:,\d+)? \+(\d+)/.exec(l);
+    if (h) { n = +h[1]; continue; }
+    if (l.startsWith('+') || l.startsWith('-')) return n;
+    if (!l.startsWith('\\')) n++;
+  }
+  return 1;
+}
+async function openInEditor() {
+  const f = curFile(); if (!f) return;
+  const cfg = editorCfg();
+  if (!cfg.editor) { toast('Pick your editor first'); return openSettings(); }
+  if (S.token === 'demo') return toast('Demo mode — editor launch is disabled');
+  if (f.status === 'removed') return toast('File was deleted in this PR');
+  const base = { nwo: S.d.pr.repository.nameWithOwner, number: S.d.pr.number, headOid: S.d.headOid, file: f.filename, line: firstChangedLine(f), settings: cfg };
+  toast('Opening in editor…');
+  try {
+    let r = await native.openEditor(base);
+    if (r.reason === 'no-clone') {
+      const path = f.filename.split('/').map(encodeURIComponent).join('/');
+      const resp = await fetch(`https://api.github.com/repos/${base.nwo}/contents/${path}?ref=${base.headOid}`, { headers: { Authorization: 'Bearer ' + S.token, Accept: 'application/vnd.github.raw+json' } });
+      if (!resp.ok) throw new Error('Could not download the file (' + resp.status + ')');
+      r = await native.openEditor({ ...base, content: await resp.text() });
+    }
+    toast(r.ok ? '✓ ' + r.msg : r.msg);
+  } catch (e) { toast('Could not open editor: ' + e.message); }
+}
+
 /* ---------- help ---------- */
 function toggleHelp(force) {
   const h = $('#help'); const show = force ?? h.hidden; h.hidden = !show;
@@ -618,13 +820,14 @@ function toggleHelp(force) {
   const R = (k, d) => `<div class="r"><span>${d}</span><span>${k.map((x) => `<kbd>${x}</kbd>`).join(' ')}</span></div>`;
   h.innerHTML = `<div class="box"><h3>Keyboard shortcuts</h3>
    <div><h4>PR list</h4>${R(['j', '↓'], 'Next PR')}${R(['k', '↑'], 'Previous PR')}${R(['⏎', 'l'], 'Review files')}${R(['o'], 'Open on GitHub')}${R(['⇧M'], 'Smart merge')}${R(['⇧U'], 'Update branch (when behind)')}${R(['m'], 'Cycle merge filter: ready / needs update / auto / conflicts')}${R(['⇧X'], 'Close PR (no merge)')}${R(['/', '⌘F'], 'Focus filter')}${R(['⌘K / Ctrl+K'], 'Search PRs by title / description')}${R(['1', '–', '4'], 'Switch source')}${R(['s'], 'Cycle sort')}${R(['r'], 'Refresh')}${R(['d'], 'Toggle hide drafts')}${R(['x'], 'Clear filter')}</div>
-   <div><h4>File review</h4>${R(['j', '↓'], 'Next file')}${R(['k', '↑'], 'Previous file')}${R(['n', 'p'], 'Next / prev unviewed')}${R(['Space', '⏎', 'v'], 'Toggle viewed (+ next unviewed)')}${R(['⇧J', '⇧K'], 'Scroll diff a bit')}${R(['Ctrl+D', 'Ctrl+U'], 'Half page down / up')}${R(['u'], 'Undo last viewed change')}${R(['e'], 'Expand / collapse whole file')}${R(['g', 'G'], 'Top / bottom of diff')}${R(['h'], 'Hide viewed files')}${R(['t'], 'Hide / show test files')}${R(['⇧V'], 'Mark all shown as viewed')}${R(['/'], 'Filter files')}${R(['⌘F / Ctrl+F'], 'Find in PR (Enter/⇧Enter next/prev, Tab scope)')}${R(['Ctrl+G'], 'Next find match')}${R(['[', ']'], 'Prev / next PR')}${R(['⇧M'], 'Smart merge')}${R(['⇧U'], 'Update branch (when behind)')}${R(['m'], 'Cycle merge filter: ready / needs update / auto / conflicts')}${R(['⇧X'], 'Close PR (no merge)')}${R(['o'], 'Open PR files on GitHub')}${R(['Esc', 'b'], 'Back to list')}</div>
+   <div><h4>File review</h4>${R(['j', '↓'], 'Next file')}${R(['k', '↑'], 'Previous file')}${R(['n', 'p'], 'Next / prev unviewed')}${R(['Space', '⏎', 'v'], 'Toggle viewed (+ next unviewed)')}${R(['⇧J', '⇧K'], 'Scroll diff a bit')}${R(['Ctrl+D', 'Ctrl+U'], 'Half page down / up')}${R(['u'], 'Undo last viewed change')}${R(['e'], 'Expand / collapse whole file')}${R(['⇧E'], 'Open file in your editor (vim / nvim / VS Code …)')}${R(['c'], 'Conversation (comments & reviews)')}${R([','], 'Settings (editor, terminal, repo folders)')}${R(['l'], 'Links found in the conversation')}${R(['g', 'G'], 'Top / bottom of diff')}${R(['h'], 'Hide viewed files')}${R(['t'], 'Hide / show test files')}${R(['⇧V'], 'Mark all shown as viewed')}${R(['/'], 'Filter files')}${R(['⌘F / Ctrl+F'], 'Find in PR (Enter/⇧Enter next/prev, Tab scope)')}${R(['Ctrl+G'], 'Next find match')}${R(['[', ']'], 'Prev / next PR')}${R(['⇧M'], 'Smart merge')}${R(['⇧U'], 'Update branch (when behind)')}${R(['m'], 'Cycle merge filter: ready / needs update / auto / conflicts')}${R(['⇧X'], 'Close PR (no merge)')}${R(['o'], 'Open PR files on GitHub')}${R(['Esc', 'b'], 'Back to list')}</div>
    <div style="grid-column:1/-1;color:var(--muted);margin-top:8px">File filter: <code>*.ts</code> globs, <code>src/</code> folders, <code>!*.lock</code> excludes, space/comma separated. Viewed state syncs with GitHub.</div></div>`;
 }
 
 /* ---------- keyboard ---------- */
 addEventListener('keydown', (e) => {
   const t = e.target;
+  if (S.settingsOpen) { if (e.key === 'Escape') { e.preventDefault(); closeSettings(); } return; }
   if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === 'f') {
     e.preventDefault();
     if (S.view === 'pr') { if (t.id === 'fq') t.select(); else openFind(); } else if (S.view === 'list') { $('#q').focus(); $('#q').select(); }
@@ -661,6 +864,8 @@ addEventListener('keydown', (e) => {
   if (e.metaKey || e.ctrlKey || e.altKey) return;
   if (!$('#help').hidden) { if (e.key === 'Escape' || e.key === '?') toggleHelp(false); e.preventDefault(); return; }
   if (e.key === '?') return toggleHelp(true);
+  if (e.key === ',' && S.view !== 'login' && !(S.view === 'pr' && S.drawer.open)) { e.preventDefault(); return openSettings(); }
+  if (S.view === 'pr' && S.drawer.open) return drawerKey(e);
   const k = e.key;
   if (S.view === 'list') {
     const sel = (i) => { S.sel = Math.max(0, Math.min(S.shown.length - 1, i)); updateList(); };
@@ -695,6 +900,9 @@ addEventListener('keydown', (e) => {
     else if (k === 'J' || k === 'K') $('#diff').scrollBy({ top: k === 'J' ? 160 : -160, behavior: 'smooth' });
     else if (k === 'u') undo();
     else if (k === 'e') toggleExpand();
+    else if (k === 'E') openInEditor();
+    else if (k === 'c') openDrawer('conv');
+    else if (k === 'l') openDrawer('links');
     else if (k === 'g') $('#diff').scrollTo({ top: 0, behavior: 'smooth' });
     else if (k === 'G') $('#diff').scrollTo({ top: 1e9, behavior: 'smooth' });
     else if (k === '/') { $('#ff').focus(); $('#ff').select(); }
