@@ -4,7 +4,8 @@ const DEMO = (() => {
   const av = (c, ch) => 'data:image/svg+xml;utf8,' + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="44" height="44"><rect width="44" height="44" fill="${c}"/><text x="22" y="29" font-size="20" font-family="sans-serif" fill="#fff" text-anchor="middle">${ch}</text></svg>`);
   const ago = (h) => new Date(Date.now() - h * 3600e3).toISOString();
   const lab = (n, c) => ({ name: n, color: c });
-  const mk = (i, repo, number, title, body, by, color, h, a, d, files, rd, ci, labels = [], draft = false, comments = 0) => ({
+  const mk = (i, repo, number, title, body, by, color, h, a, d, files, rd, ci, labels = [], draft = false, comments = 0, merge = 'BLOCKED', auto = false) => ({
+    mergeStateStatus: merge, mergeable: merge === 'DIRTY' ? 'CONFLICTING' : 'MERGEABLE', autoMergeRequest: auto ? { enabledAt: ago(1) } : null,
     id: 'demo' + i, number, title, bodyText: body, url: `https://github.com/${repo}/pull/${number}`, isDraft: draft,
     createdAt: ago(h + 20), updatedAt: ago(h), additions: a, deletions: d, changedFiles: files, reviewDecision: rd,
     author: { login: by, avatarUrl: av(color, by[0].toUpperCase()) }, repository: { nameWithOwner: repo },
@@ -12,13 +13,13 @@ const DEMO = (() => {
   });
   const prs = [
     mk(1, 'acme/api', 1284, 'Add token-bucket rate limiting to the public API', 'Introduces a per-key token bucket limiter and wires it into the HTTP middleware. Limits are configurable in default.yaml.', 'maria', '#8250df', 2, 412, 38, 8, 'REVIEW_REQUIRED', 'SUCCESS', [lab('feature', '1f6feb'), lab('api', '2da44e')], false, 6),
-    mk(2, 'acme/web', 3391, 'Fix flicker when switching workspaces', 'The sidebar remounted on every workspace change which caused a visible flicker. Memoize the tree.', 'tomas', '#cf222e', 5, 64, 21, 4, 'APPROVED', 'SUCCESS', [lab('bug', 'd73a4a')], false, 3),
-    mk(3, 'acme/web', 3388, 'Migrate settings page to the new design system', 'Large visual refactor of the settings screens.', 'aiko', '#0969da', 9, 1203, 887, 41, 'CHANGES_REQUESTED', 'FAILURE', [lab('design', 'a371f7'), lab('large', 'fbca04')], false, 14),
-    mk(4, 'acme/infra', 512, 'Bump Postgres to 16.4 and enable pg_stat_statements', 'Rolling upgrade plan in the description of the runbook.', 'dev-ops-bot', '#57606a', 12, 28, 9, 3, 'REVIEW_REQUIRED', 'PENDING', [lab('infra', '0e8a16')], false, 1),
+    mk(2, 'acme/web', 3391, 'Fix flicker when switching workspaces', 'The sidebar remounted on every workspace change which caused a visible flicker. Memoize the tree.', 'tomas', '#cf222e', 5, 64, 21, 4, 'APPROVED', 'SUCCESS', [lab('bug', 'd73a4a')], false, 3, 'CLEAN'),
+    mk(3, 'acme/web', 3388, 'Migrate settings page to the new design system', 'Large visual refactor of the settings screens.', 'aiko', '#0969da', 9, 1203, 887, 41, 'CHANGES_REQUESTED', 'FAILURE', [lab('design', 'a371f7'), lab('large', 'fbca04')], false, 14, 'DIRTY'),
+    mk(4, 'acme/infra', 512, 'Bump Postgres to 16.4 and enable pg_stat_statements', 'Rolling upgrade plan in the description of the runbook.', 'dev-ops-bot', '#57606a', 12, 28, 9, 3, 'REVIEW_REQUIRED', 'PENDING', [lab('infra', '0e8a16')], false, 1, 'BEHIND'),
     mk(5, 'acme/mobile', 977, 'WIP: offline mode for the inbox', 'Early draft. Do not review yet.', 'sam', '#bf8700', 27, 540, 12, 17, null, null, [lab('wip', 'cfd3d7')], true, 0),
-    mk(6, 'acme/api', 1279, 'Return 409 instead of 500 on duplicate idempotency keys', 'Fixes #1250.', 'priya', '#1a7f37', 30, 47, 6, 3, 'APPROVED', 'SUCCESS', [lab('bug', 'd73a4a')], false, 2),
-    mk(7, 'acme/web', 3377, 'Add keyboard shortcuts cheatsheet', 'Press ? anywhere to open it.', 'lena', '#d1242f', 51, 188, 4, 6, 'REVIEW_REQUIRED', 'SUCCESS', [lab('feature', '1f6feb')], false, 5),
-    mk(8, 'acme/api', 1271, 'Upgrade grpc-go and regenerate protobufs', 'Mechanical upgrade, mostly generated files.', 'maria', '#8250df', 74, 2310, 1980, 63, 'REVIEW_REQUIRED', 'SUCCESS', [lab('deps', '0366d6')], false, 0),
+    mk(6, 'acme/api', 1279, 'Return 409 instead of 500 on duplicate idempotency keys', 'Fixes #1250.', 'priya', '#1a7f37', 30, 47, 6, 3, 'APPROVED', 'SUCCESS', [lab('bug', 'd73a4a')], false, 2, 'CLEAN', true),
+    mk(7, 'acme/web', 3377, 'Add keyboard shortcuts cheatsheet', 'Press ? anywhere to open it.', 'lena', '#d1242f', 51, 188, 4, 6, 'REVIEW_REQUIRED', 'SUCCESS', [lab('feature', '1f6feb')], false, 5, 'BEHIND'),
+    mk(8, 'acme/api', 1271, 'Upgrade grpc-go and regenerate protobufs', 'Mechanical upgrade, mostly generated files.', 'maria', '#8250df', 74, 2310, 1980, 63, 'REVIEW_REQUIRED', 'SUCCESS', [lab('deps', '0366d6')], false, 0, 'CLEAN'),
     mk(9, 'acme/infra', 505, 'Terraform: move staging VPC into its own state', 'Needs a careful `terraform state mv`.', 'tomas', '#cf222e', 96, 120, 95, 11, 'REVIEW_REQUIRED', null, [lab('infra', '0e8a16')], false, 8),
   ];
   const F = (filename, status, patch, extra = {}) => {

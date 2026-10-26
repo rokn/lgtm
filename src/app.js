@@ -14,7 +14,7 @@ const S = {
 };
 const SOURCES = [['review', 'Review requested'], ['mine', 'Mine'], ['involved', 'Involved'], ['orgs', 'All in my orgs']];
 const SORTS = ['updated', 'created', 'size', 'repo'];
-const CHIPS = [['-is:draft', 'Hide drafts'], ['is:approved', 'Approved'], ['is:changes', 'Changes requested'], ['is:unreviewed', 'Needs review'], ['ci:fail', 'CI failing']];
+const CHIPS = [['merge:ready', 'Ready to merge'], ['merge:behind', 'Needs update'], ['merge:auto', 'Auto-merging'], ['merge:conflict', 'Conflicts'], ['-is:draft', 'Hide drafts'], ['is:approved', 'Approved'], ['is:changes', 'Changes requested'], ['is:unreviewed', 'Needs review'], ['ci:fail', 'CI failing']];
 
 /* ---------- helpers ---------- */
 let toastT;
@@ -45,7 +45,7 @@ async function rest(path) {
 }
 
 /* ---------- data: PR list ---------- */
-const PR_FIELDS = `id number title bodyText url isDraft createdAt updatedAt additions deletions changedFiles reviewDecision
+const PR_FIELDS = `id number title bodyText url isDraft mergeable mergeStateStatus autoMergeRequest { enabledAt } createdAt updatedAt additions deletions changedFiles reviewDecision
   author { login avatarUrl(size: 44) } repository { nameWithOwner }
   labels(first: 5) { nodes { name color } } comments { totalCount }
   commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }`;
@@ -88,6 +88,17 @@ function parseQuery(q) {
     return i > 0 ? { neg, key: t.slice(0, i).toLowerCase(), val: t.slice(i + 1).toLowerCase() } : { neg, key: '', val: t.toLowerCase() };
   });
 }
+// Where is this PR on its way to merged?
+function mergeKind(p) {
+  if (p.autoMergeRequest) return 'auto';
+  if (p.isDraft) return null;
+  if (p.mergeable === 'CONFLICTING' || p.mergeStateStatus === 'DIRTY') return 'conflict';
+  if (p.mergeStateStatus === 'BEHIND') return 'behind';
+  if (p.mergeable === 'MERGEABLE' && ['CLEAN', 'HAS_HOOKS'].includes(p.mergeStateStatus)) return 'ready';
+  if (p.mergeStateStatus === 'BLOCKED') return 'blocked';
+  return null;
+}
+const MERGE_BADGE = { auto: ['b-auto', '⏳ Auto-merge on'], conflict: ['b-bad', 'Conflicts'], behind: ['b-warn', '↻ Needs update'], ready: ['b-ok', '✓ Ready to merge'], blocked: ['b-draft', 'Blocked'] };
 const ci = (p) => p.commits.nodes[0]?.commit.statusCheckRollup?.state;
 function matches(p, terms) {
   return terms.every(({ neg, key, val }) => {
@@ -97,6 +108,7 @@ function matches(p, terms) {
     else if (key === 'author') ok = (p.author?.login || '').toLowerCase().includes(val);
     else if (key === 'label') ok = p.labels.nodes.some((l) => l.name.toLowerCase().includes(val));
     else if (key === 'ci') ok = { fail: ['FAILURE', 'ERROR'], pass: ['SUCCESS'], pending: ['PENDING', 'EXPECTED'] }[val]?.includes(ci(p)) ?? false;
+    else if (key === 'merge') ok = mergeKind(p) === val;
     else if (key === 'is') ok = { draft: p.isDraft, ready: !p.isDraft, approved: p.reviewDecision === 'APPROVED', changes: p.reviewDecision === 'CHANGES_REQUESTED', unreviewed: p.reviewDecision === 'REVIEW_REQUIRED' || !p.reviewDecision }[val] ?? false;
     else ok = hay.includes(val);
     return neg ? !ok : ok;
@@ -126,12 +138,12 @@ function mountList() {
   $('#app').innerHTML = `
   <div class="top">
     <div class="seg">${SOURCES.map(([k, l], i) => `<button data-src="${k}" title="${i + 1}">${l}</button>`).join('')}</div>
-    <div class="grow"><input id="q" placeholder="Filter…  repo:foo  author:bar  label:bug  is:draft  -is:draft  ci:fail   ( / )" value="${esc(S.q)}"></div>
+    <div class="grow"><input id="q" placeholder="Filter…  repo:foo  author:bar  label:bug  merge:ready  -is:draft  ci:fail   ( / )" value="${esc(S.q)}"></div>
     <button id="sortb"></button><button id="refresh" title="r">⟳ Refresh</button><button id="help-b">?</button>
   </div>
   <div class="chips" id="chips"></div>
   <div class="body"><div class="side" id="side"></div><div class="main" id="prs"></div></div>
-  <div class="foot"><span><kbd>j</kbd><kbd>k</kbd> move</span><span><kbd>⏎</kbd> review files</span><span><kbd>o</kbd> open on GitHub</span><span><kbd>⇧M</kbd> smart merge</span><span><kbd>/</kbd> filter</span><span><kbd>1</kbd>–<kbd>4</kbd> source</span><span><kbd>s</kbd> sort</span><span><kbd>?</kbd> all shortcuts</span><span id="count" style="margin-left:auto"></span></div>`;
+  <div class="foot"><span><kbd>j</kbd><kbd>k</kbd> move</span><span><kbd>⏎</kbd> review files</span><span><kbd>o</kbd> open on GitHub</span><span><kbd>⇧M</kbd> smart merge</span><span><kbd>⇧U</kbd> update branch</span><span><kbd>m</kbd> merge filter</span><span><kbd>/</kbd> filter</span><span><kbd>1</kbd>–<kbd>4</kbd> source</span><span><kbd>s</kbd> sort</span><span><kbd>?</kbd> all shortcuts</span><span id="count" style="margin-left:auto"></span></div>`;
   $('#q').addEventListener('input', (e) => { S.q = e.target.value; lset('q', S.q); S.sel = 0; updateList(); });
 }
 function listClick(e) {
@@ -175,7 +187,7 @@ function prRow(p, i) {
     <img src="${esc(p.author?.avatarUrl || '')}" alt="">
     <div><div><span class="t">${esc(p.title)}</span></div>
       <div class="meta"><span>${esc(p.repository.nameWithOwner)} #${p.number}</span><span>${esc(p.author?.login || 'ghost')}</span>
-        ${p.isDraft ? '<span class="badge b-draft">Draft</span>' : ''}${rd ? `<span class="badge ${rd[0]}">${rd[1]}</span>` : ''}
+        ${p.isDraft ? '<span class="badge b-draft">Draft</span>' : ''}${MERGE_BADGE[mergeKind(p)] ? `<span class="badge ${MERGE_BADGE[mergeKind(p)][0]}">${MERGE_BADGE[mergeKind(p)][1]}</span>` : ''}${rd ? `<span class="badge ${rd[0]}">${rd[1]}</span>` : ''}
         ${p.labels.nodes.map((l) => `<span class="label" style="background:#${esc(l.color)}">${esc(l.name)}</span>`).join('')}</div></div>
     <div class="right"><div>${dot ? `<span class="dot ${dot}"></span> ` : ''}<span class="add">+${p.additions}</span> <span class="del">−${p.deletions}</span> · ${p.changedFiles} files</div>
       <div>${p.comments.totalCount ? '💬 ' + p.comments.totalCount + ' · ' : ''}updated ${ago(p.updatedAt)} ago</div></div></div>`;
@@ -518,12 +530,26 @@ async function smartMerge(pr) {
     if (repo.autoMergeAllowed && repo.rebaseMergeAllowed) {
       try {
         await gql(`mutation($id:ID!){enablePullRequestAutoMerge(input:{pullRequestId:$id,mergeMethod:REBASE}){clientMutationId}}`, { id: p.id });
-        toast(`✓ ${updated ? 'Branch updated, a' : 'A'}uto-merge (rebase) enabled — it will merge when requirements pass`); afterMerge(pr, true); return;
+        pr.autoMergeRequest = { enabledAt: new Date().toISOString() }; toast(`✓ ${updated ? 'Branch updated, a' : 'A'}uto-merge (rebase) enabled — it will merge when requirements pass`); afterMerge(pr, true); return;
       } catch (e) { note = ' Auto-merge failed: ' + e.message; }
     } else note = !repo.rebaseMergeAllowed ? ' Rebase merging is disabled for this repo.' : ' Auto-merge is not enabled for this repo.';
     // 3. tell the user
     toast((updated ? 'Branch updated.' : 'Nothing to merge automatically.') + note + ` Status: ${p.mergeStateStatus}. Needs manual attention.`);
   } catch (e) { toast('Merge failed: ' + e.message); }
+  finally { merging = false; }
+}
+async function updateBranch(pr) {
+  if (!pr || merging) return;
+  merging = true;
+  try {
+    const [owner, name] = pr.repository.nameWithOwner.split('/');
+    const p = (await gql(`query($o:String!,$n:String!,$num:Int!){repository(owner:$o,name:$n){pullRequest(number:$num){id headRefOid mergeStateStatus}}}`, { o: owner, n: name, num: pr.number })).repository.pullRequest;
+    if (p.mergeStateStatus === 'DIRTY') return toast('Merge conflicts — cannot update automatically');
+    if (p.mergeStateStatus !== 'BEHIND') return toast(`Branch is already up to date (${p.mergeStateStatus.toLowerCase()})`);
+    await gql(`mutation($id:ID!,$oid:GitObjectID!){updatePullRequestBranch(input:{pullRequestId:$id,expectedHeadOid:$oid}){clientMutationId}}`, { id: p.id, oid: p.headRefOid });
+    pr.mergeStateStatus = 'UNKNOWN'; updateList(); toast(`✓ Updated branch of #${pr.number}`);
+    setTimeout(() => S.view === 'list' && loadPRs(), 4000);
+  } catch (e) { toast('Could not update branch: ' + e.message); }
   finally { merging = false; }
 }
 async function closePR(pr) {
@@ -591,8 +617,8 @@ function toggleHelp(force) {
   if (!show) return;
   const R = (k, d) => `<div class="r"><span>${d}</span><span>${k.map((x) => `<kbd>${x}</kbd>`).join(' ')}</span></div>`;
   h.innerHTML = `<div class="box"><h3>Keyboard shortcuts</h3>
-   <div><h4>PR list</h4>${R(['j', '↓'], 'Next PR')}${R(['k', '↑'], 'Previous PR')}${R(['⏎', 'l'], 'Review files')}${R(['o'], 'Open on GitHub')}${R(['⇧M'], 'Smart merge')}${R(['⇧X'], 'Close PR (no merge)')}${R(['/', '⌘F'], 'Focus filter')}${R(['⌘K / Ctrl+K'], 'Search PRs by title / description')}${R(['1', '–', '4'], 'Switch source')}${R(['s'], 'Cycle sort')}${R(['r'], 'Refresh')}${R(['d'], 'Toggle hide drafts')}${R(['x'], 'Clear filter')}</div>
-   <div><h4>File review</h4>${R(['j', '↓'], 'Next file')}${R(['k', '↑'], 'Previous file')}${R(['n', 'p'], 'Next / prev unviewed')}${R(['Space', '⏎', 'v'], 'Toggle viewed (+ next unviewed)')}${R(['⇧J', '⇧K'], 'Scroll diff a bit')}${R(['Ctrl+D', 'Ctrl+U'], 'Half page down / up')}${R(['u'], 'Undo last viewed change')}${R(['e'], 'Expand / collapse whole file')}${R(['g', 'G'], 'Top / bottom of diff')}${R(['h'], 'Hide viewed files')}${R(['t'], 'Hide / show test files')}${R(['⇧V'], 'Mark all shown as viewed')}${R(['/'], 'Filter files')}${R(['⌘F / Ctrl+F'], 'Find in PR (Enter/⇧Enter next/prev, Tab scope)')}${R(['Ctrl+G'], 'Next find match')}${R(['[', ']'], 'Prev / next PR')}${R(['⇧M'], 'Smart merge')}${R(['⇧X'], 'Close PR (no merge)')}${R(['o'], 'Open PR files on GitHub')}${R(['Esc', 'b'], 'Back to list')}</div>
+   <div><h4>PR list</h4>${R(['j', '↓'], 'Next PR')}${R(['k', '↑'], 'Previous PR')}${R(['⏎', 'l'], 'Review files')}${R(['o'], 'Open on GitHub')}${R(['⇧M'], 'Smart merge')}${R(['⇧U'], 'Update branch (when behind)')}${R(['m'], 'Cycle merge filter: ready / needs update / auto / conflicts')}${R(['⇧X'], 'Close PR (no merge)')}${R(['/', '⌘F'], 'Focus filter')}${R(['⌘K / Ctrl+K'], 'Search PRs by title / description')}${R(['1', '–', '4'], 'Switch source')}${R(['s'], 'Cycle sort')}${R(['r'], 'Refresh')}${R(['d'], 'Toggle hide drafts')}${R(['x'], 'Clear filter')}</div>
+   <div><h4>File review</h4>${R(['j', '↓'], 'Next file')}${R(['k', '↑'], 'Previous file')}${R(['n', 'p'], 'Next / prev unviewed')}${R(['Space', '⏎', 'v'], 'Toggle viewed (+ next unviewed)')}${R(['⇧J', '⇧K'], 'Scroll diff a bit')}${R(['Ctrl+D', 'Ctrl+U'], 'Half page down / up')}${R(['u'], 'Undo last viewed change')}${R(['e'], 'Expand / collapse whole file')}${R(['g', 'G'], 'Top / bottom of diff')}${R(['h'], 'Hide viewed files')}${R(['t'], 'Hide / show test files')}${R(['⇧V'], 'Mark all shown as viewed')}${R(['/'], 'Filter files')}${R(['⌘F / Ctrl+F'], 'Find in PR (Enter/⇧Enter next/prev, Tab scope)')}${R(['Ctrl+G'], 'Next find match')}${R(['[', ']'], 'Prev / next PR')}${R(['⇧M'], 'Smart merge')}${R(['⇧U'], 'Update branch (when behind)')}${R(['m'], 'Cycle merge filter: ready / needs update / auto / conflicts')}${R(['⇧X'], 'Close PR (no merge)')}${R(['o'], 'Open PR files on GitHub')}${R(['Esc', 'b'], 'Back to list')}</div>
    <div style="grid-column:1/-1;color:var(--muted);margin-top:8px">File filter: <code>*.ts</code> globs, <code>src/</code> folders, <code>!*.lock</code> excludes, space/comma separated. Viewed state syncs with GitHub.</div></div>`;
 }
 
@@ -646,6 +672,8 @@ addEventListener('keydown', (e) => {
     else if (k === 'o') S.shown[S.sel] && ghOpen(S.shown[S.sel].url);
     else if (k === 'M') smartMerge(S.shown[S.sel]);
     else if (k === 'X') closePR(S.shown[S.sel]);
+    else if (k === 'U') updateBranch(S.shown[S.sel]);
+    else if (k === 'm') { const order = ['', 'ready', 'behind', 'auto', 'conflict']; const cur = (S.q.match(/(?:^|\s)merge:(\w+)/) || [])[1] || ''; const nx = order[(order.indexOf(cur) + 1) % order.length]; setQuery(S.q.split(/\s+/).filter((t) => t && !t.startsWith('merge:')).concat(nx ? ['merge:' + nx] : []).join(' ')); toast(nx ? `Showing: ${MERGE_BADGE[nx][1]}` : 'Showing all merge states'); }
     else if (k === '/') { e.preventDefault(); $('#q').focus(); $('#q').select(); }
     else if (k >= '1' && k <= '4') setSource(SOURCES[+k - 1][0]);
     else if (k === 's') cycleSort();

@@ -104,3 +104,5 @@ body.mac .top { padding-left:84px; }
 .pm { color:var(--muted); font-size:12px; } .ps { color:var(--muted); font-size:12px; margin-top:2px; }
 #palette mark { background:rgba(255,200,0,.4); color:inherit; border-radius:2px; }
 .phint { padding:6px 16px; border-top:1px solid var(--border); color:var(--muted); font-size:11px; }
+
+.b-auto { color:var(--purple); border-color:var(--purple); }
