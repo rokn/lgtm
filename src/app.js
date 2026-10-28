@@ -388,7 +388,7 @@ function mountPR() {
   $('#app').innerHTML = `
   <div class="top"><button id="back" title="Esc">← Back</button>
     <div class="ptitle">${esc(p.repository.nameWithOwner)} <span style="color:var(--muted)">#${p.number}</span> ${esc(p.title)}</div>
-    <button id="prev">[ prev PR</button><button id="next">next PR ]</button><button id="cbtn" title="c">💬 Comments <kbd>c</kbd></button><button id="lbtn" title="l">🔗 Links <kbd>l</kbd></button><button id="closepr" title="X">Close PR <kbd>⇧X</kbd></button><button id="merge" title="M">Smart merge <kbd>M</kbd></button><button id="gh">Open on GitHub</button><button id="help-b">?</button></div>
+    <button id="prev">[ prev PR</button><button id="next">next PR ]</button><button id="cbtn" title="Shift+C">💬 Comments <kbd>⇧C</kbd></button><button id="lbtn" title="l">🔗 Links <kbd>l</kbd></button><button id="closepr" title="X">Close PR <kbd>⇧X</kbd></button><button id="merge" title="M">Smart merge <kbd>M</kbd></button><button id="gh">Open on GitHub</button><button id="help-b">?</button></div>
   <div class="body">
     <div class="files"><div class="fhead">
       <input id="ff" placeholder="Filter files: *.ts  src/  !*.lock  ( / )" value="${esc(S.d.filter)}">
@@ -411,7 +411,7 @@ function mountPR() {
 }
 function prClick(e) {
   if (S.view !== 'pr') return;
-  const t = e.target.closest('[data-f],[data-dir],#back,#prev,#next,#gh,#merge,#eb,#edb,#closepr,#cbtn,#lbtn,[data-tab],[data-url],[data-li],[data-jump],#fscope,#fprev,#fnext,#fclose,#help-b,#vb,[data-chk]'); if (!t) return;
+  const t = e.target.closest('[data-f],[data-dir],#back,#prev,#next,#gh,#merge,#eb,#edb,#closepr,#cbtn,#lbtn,#cmb,[data-tab],[data-url],[data-li],[data-jump],#fscope,#fprev,#fnext,#fclose,#help-b,#vb,[data-chk]'); if (!t) return;
   if (t.dataset.chk != null) { e.stopPropagation(); const f = visibleFiles()[+t.dataset.chk]; if (f) setViewed(f, !f.viewed); return; }
   if (t.dataset.f != null) { S.d.cur = visibleFiles()[+t.dataset.f]?.filename; updateFiles(); }
   else if (t.dataset.dir) { S.d.filter = e.shiftKey ? `${S.d.filter} !${t.dataset.dir}`.trim() : t.dataset.dir; $('#ff').value = S.d.filter; lset('ff', S.d.filter); updateFiles(); }
@@ -425,6 +425,7 @@ function prClick(e) {
   else if (t.dataset.li != null) { S.drawer.sel = +t.dataset.li; ghOpen(S.d.links[+t.dataset.li].url); renderDrawer(); }
   else if (t.dataset.jump) { const f = S.d.files.find((x) => x.filename === t.dataset.jump); if (!f) return toast('File not in this PR'); if (!visibleFiles().includes(f)) { S.d.filter = ''; $('#ff').value = ''; S.hideTests = false; $('#ht').checked = false; } S.d.cur = f.filename; closeDrawer(); updateFiles(); }
   else if (t.id === 'edb') openInEditor();
+  else if (t.id === 'cmb') openComposer();
   else if (t.id === 'eb') toggleExpand();
   else if (t.id === 'fscope') toggleScope();
   else if (t.id === 'fprev') stepFind(-1);
@@ -488,6 +489,7 @@ function renderDiffInner() {
   const idx = visibleFiles().indexOf(f);
   head.innerHTML = `<div class="path" title="${esc(f.filename)}">${f.previous_filename ? esc(f.previous_filename) + ' → ' : ''}${esc(f.filename)}</div>
     <span><span class="add">+${f.additions}</span> <span class="del">−${f.deletions}</span></span><span style="color:var(--muted)">${idx + 1}/${visibleFiles().length}</span>
+    <button id="cmb" title="c">Comment <kbd>c</kbd></button>
     <button id="edb" title="Shift+E">Open in editor <kbd>⇧E</kbd></button>
     <button id="eb" class="${f.expanded ? 'on' : ''}">${f.expanded ? 'Collapse' : 'Expand file'} <kbd>e</kbd></button>
     <button id="vb" class="${f.viewed ? 'on' : ''}">${f.viewed ? '✓ Viewed' : 'Mark viewed'} <kbd>v</kbd></button>`;
@@ -498,16 +500,16 @@ function renderDiffInner() {
   if (!f.patch) { box.innerHTML = `<div class="empty">${f.changes === 0 ? 'No content changes (rename / mode change).' : 'Diff not available (binary or too large). Press <kbd>O</kbd> to view on GitHub.'}</div>`; box.style.scrollBehavior = ''; return; }
   const lang = langFor(f.filename); const rows = []; let o = 0, n = 0; const lines = f.patch.split('\n'); const MAX = f.expanded ? 20000 : 4000;
   const full = f.expanded ? f.full : null; let next = 1; // next new-file line not yet emitted (expanded mode)
-  const ctx = (upto, off) => { for (; next <= upto && next <= full.length; next++) rows.push(`<tr><td class="n">${next + off}</td><td class="n">${next}</td><td class="c"> ${hl(full[next - 1], lang)}</td></tr>`); };
+  const ctx = (upto, off) => { for (; next <= upto && next <= full.length; next++) rows.push(`<tr data-s="R" data-l="${next}"><td class="n">${next + off}</td><td class="n">${next}</td><td class="c"> ${hl(full[next - 1], lang)}</td></tr>`); };
   for (const l of lines.slice(0, MAX)) {
     if (l.startsWith('@@')) {
       const m = /@@ -(\d+)(?:,\d+)? \+(\d+)/.exec(l); o = +m[1]; n = +m[2];
       if (full) ctx(n - 1, o - n); else rows.push(`<tr class="h"><td class="n"></td><td class="n"></td><td>${esc(l)}</td></tr>`);
     }
-    else if (l.startsWith('+')) { rows.push(`<tr class="a"><td class="n"></td><td class="n">${n++}</td><td class="c">+${hl(l.slice(1), lang)}</td></tr>`); next = n; }
-    else if (l.startsWith('-')) rows.push(`<tr class="d"><td class="n">${o++}</td><td class="n"></td><td class="c">-${hl(l.slice(1), lang)}</td></tr>`);
+    else if (l.startsWith('+')) { rows.push(`<tr class="a" data-s="R" data-l="${n}"><td class="n"></td><td class="n">${n++}</td><td class="c">+${hl(l.slice(1), lang)}</td></tr>`); next = n; }
+    else if (l.startsWith('-')) rows.push(`<tr class="d" data-s="L" data-l="${o}"><td class="n">${o++}</td><td class="n"></td><td class="c">-${hl(l.slice(1), lang)}</td></tr>`);
     else if (l.startsWith('\\')) rows.push(`<tr><td class="n"></td><td class="n"></td><td style="color:var(--muted)">${esc(l)}</td></tr>`);
-    else { rows.push(`<tr><td class="n">${o++}</td><td class="n">${n++}</td><td class="c"> ${hl(l.slice(1), lang)}</td></tr>`); next = n; }
+    else { rows.push(`<tr data-s="R" data-l="${n}"><td class="n">${o++}</td><td class="n">${n++}</td><td class="c"> ${hl(l.slice(1), lang)}</td></tr>`); next = n; }
   }
   if (full) ctx(full.length, o - n);
   box.innerHTML = `<table>${rows.join('')}</table>${lines.length > MAX ? `<div class="empty">Diff truncated (${lines.length} lines). Press <kbd>O</kbd> to view on GitHub.</div>` : ''}`;
@@ -757,7 +759,7 @@ function afterConv() {
 }
 function updateConvButtons() {
   const d = S.d; if (!d || !$('#cbtn')) return;
-  $('#cbtn').innerHTML = `💬 Comments${d.items ? ` <span class="cnt">${d.total}</span>` : ''} <kbd>c</kbd>`;
+  $('#cbtn').innerHTML = `💬 Comments${d.items ? ` <span class="cnt">${d.total}</span>` : ''} <kbd>⇧C</kbd>`;
   $('#lbtn').innerHTML = `🔗 Links${d.links ? ` <span class="cnt">${d.links.length}</span>` : ''} <kbd>l</kbd>`;
 }
 function openDrawer(tab) { S.drawer = { open: true, tab, sel: 0 }; renderDrawer(); }
@@ -784,17 +786,17 @@ function renderDrawer() {
     else {
       let last = ''; body = d.links.map((l, i) => {
         const head = l.cat !== last ? `<h4>${CAT_ICON[l.cat]} ${l.cat}</h4>` : ''; last = l.cat;
-        return `${head}<div class="lk ${i === dr.sel ? 'sel' : ''}" data-li="${i}"><div class="lt"><div class="ln">${esc(l.label || l.name)}</div><div class="lu">${esc(l.url)}</div></div><div class="lm">${l.users.map((u) => '@' + esc(u)).join(' ')}${l.count > 1 ? ` · ×${l.count}` : ''}</div></div>`;
+        return `${head}<div class="lk ${i === dr.sel ? 'sel' : ''}" data-li="${i}"><span class="qd">${i < 5 ? `<kbd>${i + 1}</kbd>` : ''}</span><div class="lt"><div class="ln">${esc(l.label || l.name)}</div><div class="lu">${esc(l.url)}</div></div><div class="lm">${l.users.map((u) => '@' + esc(u)).join(' ')}${l.count > 1 ? ` · ×${l.count}` : ''}</div></div>`;
       }).join('');
     }
   }
-  el.innerHTML = `<div class="dtabs"><button data-tab="conv" class="${dr.tab === 'conv' ? 'on' : ''}">💬 Conversation${d.items ? ` (${d.total})` : ''}</button><button data-tab="links" class="${dr.tab === 'links' ? 'on' : ''}">🔗 Links${d.links ? ` (${d.links.length})` : ''}</button></div><div class="dbody" id="dbody">${body}</div><div class="dfoot">${dr.tab === 'links' ? '<kbd>j</kbd><kbd>k</kbd> select · <kbd>⏎</kbd> open · <kbd>y</kbd> copy · ' : '<kbd>j</kbd><kbd>k</kbd> scroll · '}<kbd>Tab</kbd> switch · <kbd>Esc</kbd> close</div>`;
+  el.innerHTML = `<div class="dtabs"><button data-tab="conv" class="${dr.tab === 'conv' ? 'on' : ''}">💬 Conversation${d.items ? ` (${d.total})` : ''}</button><button data-tab="links" class="${dr.tab === 'links' ? 'on' : ''}">🔗 Links${d.links ? ` (${d.links.length})` : ''}</button></div><div class="dbody" id="dbody">${body}</div><div class="dfoot">${dr.tab === 'links' ? '<kbd>1</kbd>–<kbd>5</kbd> open · <kbd>j</kbd><kbd>k</kbd> select · <kbd>⏎</kbd> open · <kbd>y</kbd> copy · ' : '<kbd>j</kbd><kbd>k</kbd> scroll · '}<kbd>Tab</kbd> switch · <kbd>Esc</kbd> close</div>`;
   $('#drawer .lk.sel')?.scrollIntoView({ block: 'nearest' });
 }
 function drawerKey(e) {
   const dr = S.drawer, k = e.key; e.preventDefault();
   if (k === 'Escape') return closeDrawer();
-  if (k === 'c') return dr.tab === 'conv' ? closeDrawer() : (dr.tab = 'conv', renderDrawer());
+  if (k === 'C') return dr.tab === 'conv' ? closeDrawer() : (dr.tab = 'conv', renderDrawer());
   if (k === 'l') return dr.tab === 'links' ? closeDrawer() : (dr.tab = 'links', dr.sel = 0, renderDrawer());
   if (k === 'Tab') { dr.tab = dr.tab === 'conv' ? 'links' : 'conv'; dr.sel = 0; return renderDrawer(); }
   if (dr.tab === 'links' && S.d.links?.length) {
@@ -802,6 +804,7 @@ function drawerKey(e) {
     if (k === 'j' || k === 'ArrowDown') { dr.sel = Math.min(n - 1, dr.sel + 1); renderDrawer(); }
     else if (k === 'k' || k === 'ArrowUp') { dr.sel = Math.max(0, dr.sel - 1); renderDrawer(); }
     else if (k === 'Enter' || k === 'o') ghOpen(S.d.links[dr.sel].url);
+    else if (k >= '1' && k <= '5' && S.d.links[+k - 1]) { dr.sel = +k - 1; ghOpen(S.d.links[+k - 1].url); renderDrawer(); }
     else if (k === 'y') { navigator.clipboard?.writeText(S.d.links[dr.sel].url).then(() => toast('Link copied'), () => toast('Could not copy')); }
   } else if (k === 'j' || k === 'ArrowDown') $('#dbody').scrollBy({ top: 90, behavior: 'smooth' });
   else if (k === 'k' || k === 'ArrowUp') $('#dbody').scrollBy({ top: -90, behavior: 'smooth' });
@@ -823,22 +826,79 @@ function openSettings() {
   el.innerHTML = `<div class="box"><h3 style="margin:0 0 4px">Settings</h3>
     <label>Editor<select id="se">${!c.editor ? '<option value="">Choose…</option>' : ''}${EDITORS.map(([k, n]) => `<option value="${k}" ${c.editor === k ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
     <label id="st-row">Terminal for vim / Neovim / Helix<select id="st">${terms.map(([k, n]) => `<option value="${k}" ${c.terminal === k ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
+    <label id="sv-row" style="flex-direction:row;align-items:center;gap:8px"><input type="checkbox" id="sv" ${c.reuseNvim !== false ? 'checked' : ''}> Reuse the Neovim already opened from LGTM instead of starting a new one</label>
+    <label id="si-row">iTerm2 opens in<select id="si"><option value="tab" ${!c.itermWindow ? 'selected' : ''}>a new tab</option><option value="window" ${c.itermWindow ? 'selected' : ''}>a new window</option></select></label>
     <label id="sc-row">Custom command <span class="muted">— use {file} {line} {dir}</span><input id="sc" value="${esc(c.custom)}" placeholder="e.g. emacsclient -n +{line} {file}" spellcheck="false"></label>
     <label>Where your repos live <span class="muted">— comma separated, searched 3 levels deep for a clone of the PR's repo</span><input id="sr" value="${esc(c.roots)}" spellcheck="false"></label>
     <label>Refresh PR list <select id="sp">${[[30, 'every 30 seconds'], [60, 'every minute'], [120, 'every 2 minutes'], [300, 'every 5 minutes']].map(([v, n]) => `<option value="${v}" ${pollCfg().secs === v ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
     <label style="flex-direction:row;align-items:center;gap:8px"><input type="checkbox" id="sn" ${pollCfg().notify ? 'checked' : ''}> Desktop notifications when a PR changes while LGTM is in the background</label>
     <div class="muted" style="font-size:12px">Files open at the first changed line. If your checkout isn't on the PR's commit, a separate git worktree of the PR is created for you (your working copy is never touched). With no local clone, a read-only snapshot of the file opens instead.</div>
     <div style="display:flex;gap:8px;justify-content:flex-end"><button id="s-cancel">Cancel <kbd>Esc</kbd></button><button id="s-save" class="on">Save</button></div></div>`;
-  const sync = () => { const v = $('#se').value; $('#st-row').hidden = !TUI_EDITORS.includes(v); $('#sc-row').hidden = v !== 'custom'; };
-  $('#se').onchange = sync; sync();
+  const sync = () => { const v = $('#se').value; $('#st-row').hidden = !TUI_EDITORS.includes(v); $('#sv-row').hidden = $('#se').value !== 'nvim'; $('#si-row').hidden = $('#st-row').hidden || $('#st').value !== 'iterm'; $('#sc-row').hidden = v !== 'custom'; };
+  $('#se').onchange = sync; $('#st').onchange = sync; sync();
   $('#s-cancel').onclick = closeSettings;
   $('#s-save').onclick = () => {
-    lset('editor', { editor: $('#se').value, terminal: $('#st').value, custom: $('#sc').value, roots: $('#sr').value });
+    lset('editor', { editor: $('#se').value, terminal: $('#st').value, itermWindow: $('#si').value === 'window', reuseNvim: $('#sv').checked, custom: $('#sc').value, roots: $('#sr').value });
     lset('poll', { secs: +$('#sp').value, notify: $('#sn').checked }); schedulePoll(); closeSettings(); toast('Settings saved');
   };
   el.onmousedown = (e) => { if (e.target === el) closeSettings(); };
   $('#se').focus();
 }
+/* ---------- leave a comment ---------- */
+async function restPost(path, body) {
+  const r = await fetch('https://api.github.com' + path, { method: 'POST', headers: { Authorization: 'Bearer ' + S.token, Accept: 'application/vnd.github+json', 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(`${j.message || 'GitHub ' + r.status}${j.errors?.[0]?.message ? ' — ' + j.errors[0].message : ''}`);
+  return j;
+}
+const rowInfo = (tr) => tr && tr.dataset.l ? { side: tr.dataset.s === 'L' ? 'LEFT' : 'RIGHT', line: +tr.dataset.l } : null;
+function commentTarget() { // selected text wins, then the last clicked line number
+  const f = curFile(); if (!f) return null;
+  const sel = getSelection(); let a, b;
+  if (sel && !sel.isCollapsed) {
+    const row = (n) => (n?.nodeType === 3 ? n.parentElement : n)?.closest?.('#diff tr');
+    a = rowInfo(row(sel.anchorNode)); b = rowInfo(row(sel.focusNode));
+  } else a = b = rowInfo($('#diff tr.tgt'));
+  if (!a || !b) return null;
+  if (a.side !== b.side) a = b;
+  const [lo, hi] = a.line <= b.line ? [a, b] : [b, a];
+  return { path: f.filename, side: hi.side, line: hi.line, start: lo.line < hi.line ? lo.line : 0 };
+}
+function openComposer() {
+  const d = S.d; if (!d || !d.pr) return;
+  let tgt = commentTarget(); const el = $('#settings'); S.settingsOpen = true; el.hidden = false;
+  const label = () => tgt ? `${esc(tgt.path)}:${tgt.start ? tgt.start + '–' : ''}${tgt.line}${tgt.side === 'LEFT' ? ' (removed line)' : ''}` : 'the pull request';
+  const paint = () => {
+    $('#cm-where').innerHTML = `Commenting on <b>${label()}</b>${tgt ? ' <button id="cm-pr" class="lnk">comment on the whole PR instead</button>' : ' <span class="muted">— click a line number or select lines in the diff first to comment inline</span>'}`;
+    const b = $('#cm-pr'); if (b) b.onclick = () => { tgt = null; paint(); $('#cm-t').focus(); };
+  };
+  el.innerHTML = `<div class="box"><h3 style="margin:0">Leave a comment</h3><div id="cm-where" style="font-size:13px"></div>
+    <textarea id="cm-t" rows="7" placeholder="Write a comment… (Markdown supported)" spellcheck="true"></textarea>
+    <div style="display:flex;gap:8px;justify-content:flex-end;align-items:center"><span class="muted" id="cm-err" style="margin-right:auto;color:var(--del,#f85149)"></span><button id="s-cancel">Cancel <kbd>Esc</kbd></button><button id="cm-go" class="on">Comment <kbd>${native.platform === 'darwin' ? '⌘' : 'Ctrl+'}⏎</kbd></button></div></div>`;
+  paint();
+  const post = async () => {
+    const body = $('#cm-t').value.trim(); if (!body) return;
+    const go = $('#cm-go'); go.disabled = true; $('#cm-err').textContent = '';
+    const pr = d.pr;
+    try {
+      if (S.token !== 'demo') {
+        const nwo = pr.repository.nameWithOwner;
+        if (tgt) await restPost(`/repos/${nwo}/pulls/${pr.number}/comments`, { body, commit_id: d.headOid, path: tgt.path, line: tgt.line, side: tgt.side, ...(tgt.start ? { start_line: tgt.start, start_side: tgt.side } : {}) });
+        else await restPost(`/repos/${nwo}/issues/${pr.number}/comments`, { body });
+      }
+      closeSettings(); toast(tgt ? 'Inline comment posted' : 'Comment posted'); $('#diff tr.tgt')?.classList.remove('tgt');
+      if (S.token !== 'demo') loadConv(pr);
+    } catch (e) { go.disabled = false; $('#cm-err').textContent = 'Could not post: ' + e.message; }
+  };
+  $('#cm-go').onclick = post; $('#s-cancel').onclick = closeSettings;
+  $('#cm-t').onkeydown = (e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); post(); } };
+  el.onmousedown = (e) => { if (e.target === el) closeSettings(); };
+  $('#cm-t').focus();
+}
+document.addEventListener('click', (e) => {
+  const td = e.target.closest?.('#diff td.n'); const tr = td?.parentElement; if (!tr?.dataset.l) return;
+  const was = tr.classList.contains('tgt'); document.querySelectorAll('#diff tr.tgt').forEach((x) => x.classList.remove('tgt')); if (!was) tr.classList.add('tgt');
+});
 function closeSettings() { S.settingsOpen = false; const el = $('#settings'); el.hidden = true; el.innerHTML = ''; }
 
 function firstChangedLine(f) {
@@ -878,7 +938,7 @@ function toggleHelp(force) {
   const R = (k, d) => `<div class="r"><span>${d}</span><span>${k.map((x) => `<kbd>${x}</kbd>`).join(' ')}</span></div>`;
   h.innerHTML = `<div class="box"><h3>Keyboard shortcuts</h3>
    <div><h4>PR list</h4>${R(['j', '↓'], 'Next PR')}${R(['k', '↑'], 'Previous PR')}${R(['⏎', 'l'], 'Review files')}${R(['o'], 'Open on GitHub')}${R(['⇧M'], 'Smart merge')}${R(['⇧U'], 'Update branch (when behind)')}${R(['m'], 'Cycle merge filter: ready / needs update / auto / conflicts')}${R(['⇧X'], 'Close PR (no merge)')}${R(['/', '⌘F'], 'Focus filter')}${R(['⌘K / Ctrl+K'], 'Search PRs by title / description')}${R(['1', '–', '4'], 'Switch source')}${R(['s'], 'Cycle sort')}${R(['r'], 'Refresh now (the list also refreshes itself)')}${R(['⇧Z'], 'Mark all updates as seen')}${R(['d'], 'Toggle hide drafts')}${R(['x'], 'Clear filter')}</div>
-   <div><h4>File review</h4>${R(['j', '↓'], 'Next file')}${R(['k', '↑'], 'Previous file')}${R(['n', 'p'], 'Next / prev unviewed')}${R(['Space', '⏎', 'v'], 'Toggle viewed (+ next unviewed)')}${R(['⇧J', '⇧K'], 'Scroll diff a bit')}${R(['Ctrl+D', 'Ctrl+U'], 'Half page down / up')}${R(['u'], 'Undo last viewed change')}${R(['e'], 'Expand / collapse whole file')}${R(['⇧E'], 'Open file in your editor (vim / nvim / VS Code …)')}${R(['c'], 'Conversation (comments & reviews)')}${R([','], 'Settings (editor, terminal, repo folders)')}${R(['l'], 'Links found in the conversation')}${R(['g', 'G'], 'Top / bottom of diff')}${R(['h'], 'Hide viewed files')}${R(['t'], 'Hide / show test files')}${R(['⇧V'], 'Mark all shown as viewed')}${R(['/'], 'Filter files')}${R(['⌘F / Ctrl+F'], 'Find in PR (Enter/⇧Enter next/prev, Tab scope)')}${R(['Ctrl+G'], 'Next find match')}${R(['[', ']'], 'Prev / next PR')}${R(['⇧M'], 'Smart merge')}${R(['⇧U'], 'Update branch (when behind)')}${R(['m'], 'Cycle merge filter: ready / needs update / auto / conflicts')}${R(['⇧X'], 'Close PR (no merge)')}${R(['o'], 'Open PR files on GitHub')}${R(['Esc', 'b'], 'Back to list')}</div>
+   <div><h4>File review</h4>${R(['j', '↓'], 'Next file')}${R(['k', '↑'], 'Previous file')}${R(['n', 'p'], 'Next / prev unviewed')}${R(['Space', '⏎', 'v'], 'Toggle viewed (+ next unviewed)')}${R(['⇧J', '⇧K'], 'Scroll diff a bit')}${R(['Ctrl+D', 'Ctrl+U'], 'Half page down / up')}${R(['u'], 'Undo last viewed change')}${R(['e'], 'Expand / collapse whole file')}${R(['⇧E'], 'Open file in your editor (vim / nvim / VS Code …)')}${R(['c'], 'Leave a comment (on the selected / clicked line, else on the PR)')}${R(['⇧C'], 'Conversation (comments & reviews)')}${R(['⌘,', ','], 'Settings (editor, terminal, repo folders)')}${R(['l'], 'Links found in the conversation')}${R(['g', 'G'], 'Top / bottom of diff')}${R(['h'], 'Hide viewed files')}${R(['t'], 'Hide / show test files')}${R(['⇧V'], 'Mark all shown as viewed')}${R(['/'], 'Filter files')}${R(['⌘F / Ctrl+F'], 'Find in PR (Enter/⇧Enter next/prev, Tab scope)')}${R(['Ctrl+G'], 'Next find match')}${R(['[', ']'], 'Prev / next PR')}${R(['⇧M'], 'Smart merge')}${R(['⇧U'], 'Update branch (when behind)')}${R(['m'], 'Cycle merge filter: ready / needs update / auto / conflicts')}${R(['⇧X'], 'Close PR (no merge)')}${R(['o'], 'Open PR files on GitHub')}${R(['Esc', 'b'], 'Back to list')}</div>
    <div style="grid-column:1/-1;color:var(--muted);margin-top:8px">File filter: <code>*.ts</code> globs, <code>src/</code> folders, <code>!*.lock</code> excludes, space/comma separated. Viewed state syncs with GitHub.</div></div>`;
 }
 
@@ -891,6 +951,7 @@ addEventListener('keydown', (e) => {
     if (S.view === 'pr') { if (t.id === 'fq') t.select(); else openFind(); } else if (S.view === 'list') { $('#q').focus(); $('#q').select(); }
     return;
   }
+  if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key === ',') { e.preventDefault(); if (S.view !== 'login') openSettings(); return; }
   if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === 'k') {
     e.preventDefault(); if (S.view !== 'login') (P.open ? closePalette() : openPalette()); return;
   }
@@ -960,7 +1021,8 @@ addEventListener('keydown', (e) => {
     else if (k === 'u') undo();
     else if (k === 'e') toggleExpand();
     else if (k === 'E') openInEditor();
-    else if (k === 'c') openDrawer('conv');
+    else if (k === 'c') openComposer();
+    else if (k === 'C') openDrawer('conv');
     else if (k === 'l') openDrawer('links');
     else if (k === 'g') $('#diff').scrollTo({ top: 0, behavior: 'smooth' });
     else if (k === 'G') $('#diff').scrollTo({ top: 1e9, behavior: 'smooth' });

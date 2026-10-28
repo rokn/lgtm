@@ -32,7 +32,7 @@ Open a PR and LGTM walks you through it **file by file** with a clean, syntax-hi
 
 <p align="center"><img src="docs/screenshots/comments.png" alt="Comments and reviews next to the diff" width="900"></p>
 
-Press `c` to slide in the whole conversation: description, comments, reviews and inline threads (with resolved / outdated tags). Click a thread's file path to jump straight to it. Files with open threads get a 💬 in the file list.
+Press `Shift+C` to slide in the whole conversation: description, comments, reviews and inline threads (with resolved / outdated tags). Click a thread's file path to jump straight to it. Files with open threads get a 💬 in the file list.
 
 ### Smart Links
 
@@ -67,7 +67,7 @@ Press `l` and LGTM collects **every link** from the description, comments, revie
 | Open | `Enter` | `Space` / `Enter` marks viewed + next |
 | Search | `/` filter · `Cmd/Ctrl+K` PRs | `Cmd/Ctrl+F` find · `/` filter files |
 | Scroll | `Ctrl+D` `Ctrl+U` | `Ctrl+D` `Ctrl+U` |
-| Panels | | `c` comments · `l` links · `Shift+E` editor · `,` settings |
+| Panels | | `c` leave a comment · `Shift+C` conversation · `l` links (`1`–`5` quick-open) · `Shift+E` editor · `Cmd/Ctrl+,` settings |
 | Actions | `Shift+M` merge · `Shift+U` update branch · `m` merge filter · `Shift+X` close · `o` GitHub | same · `[` `]` prev/next PR · `Esc` back |
 
 Press `?` in the app for the full list.

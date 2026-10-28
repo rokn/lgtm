@@ -90,11 +90,14 @@ async function resolveDir(repo, { nwo, number, headOid }, userData) {
 }
 
 /* ---- launching ---- */
-async function launchTerminal(termKey, dir, cmd) {
+async function launchTerminal(termKey, dir, cmd, opts = {}) {
   const line = `cd ${q(dir)} && ${cmd.map(q).join(' ')}`;
   const asEsc = (s) => s.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
   if (isMac) {
-    if (termKey === 'iterm') return run('osascript', ['-e', 'tell application "iTerm"', '-e', 'activate', '-e', 'create window with default profile', '-e', `tell current session of current window to write text "${asEsc(line)}"`, '-e', 'end tell']);
+    if (termKey === 'iterm') {
+      const mk = opts.itermWindow ? ['create window with default profile'] : ['if (count of windows) = 0 then', 'create window with default profile', 'else', 'tell current window to create tab with default profile', 'end if'];
+      return run('osascript', ['-e', 'tell application "iTerm"', '-e', 'activate', ...mk.flatMap((l) => ['-e', l]), '-e', `tell current session of current window to write text "${asEsc(line)}"`, '-e', 'end tell']);
+    }
     if (termKey === 'ghostty') return spawnDetached('open', ['-na', 'Ghostty', '--args', '-e', 'sh', '-c', line]);
     if (termKey === 'kitty') return spawnDetached('kitty', ['sh', '-c', line]);
     if (termKey === 'alacritty') return spawnDetached('alacritty', ['-e', 'sh', '-c', line]);
@@ -115,6 +118,18 @@ async function launchTerminal(termKey, dir, cmd) {
     try { return await spawnDetached(bin, args); } catch (e) { if (e.code !== 'ENOENT') throw e; }
   }
   throw new Error('No terminal emulator found — pick one in settings');
+}
+
+// Neovim instances started by LGTM listen on a fixed socket, so later files open in that same instance.
+const NVIM_SOCK = isWin ? '' : path.join(os.tmpdir(), `lgtm-nvim-${process.getuid ? process.getuid() : 0}.sock`);
+const MAC_TERM_APP = { default: 'Terminal', iterm: 'iTerm', ghostty: 'Ghostty', kitty: 'kitty', alacritty: 'Alacritty', wezterm: 'WezTerm' };
+async function reuseNvim(target, line, termKey) {
+  if (!NVIM_SOCK || !fs.existsSync(NVIM_SOCK)) return false;
+  const vs = (x) => `'${x.replace(/'/g, "''")}'`; // vimscript string literal
+  try { await run('nvim', ['--server', NVIM_SOCK, '--remote-expr', `execute('hide edit +${line} ' . fnameescape(${vs(target)}))`], { timeout: 4000 }); }
+  catch { try { fs.unlinkSync(NVIM_SOCK); } catch {} return false; } // stale socket: the instance is gone
+  if (isMac) { try { await run('open', ['-a', MAC_TERM_APP[termKey] || 'Terminal']); } catch {} }
+  return true;
 }
 
 async function openInEditor(o, userData) {
@@ -146,7 +161,14 @@ async function openInEditor(o, userData) {
       catch (e) { if (e.code === 'ENOENT' && isMac && g.macApp) await spawnDetached('open', ['-a', g.macApp, '--args', ...g.args(target, line)]); else throw e; }
       return { ok: true, msg: `Opened in ${g.name} (${note})` };
     }
-    if (TUI[ed]) { await launchTerminal(cfg.terminal || 'default', dir, TUI[ed].cmd(target, line)); return { ok: true, msg: `Opened in ${TUI[ed].name} (${note})` }; }
+    if (TUI[ed]) {
+      const term = cfg.terminal || 'default';
+      let cmd = TUI[ed].cmd(target, line);
+      if (ed === 'nvim' && NVIM_SOCK && cfg.reuseNvim !== false) {
+        if (await reuseNvim(target, line, term)) return { ok: true, msg: `Opened in your running Neovim (${note})` };
+        cmd = ['nvim', '--listen', NVIM_SOCK, `+${line}`, target];
+      }
+      await launchTerminal(term, dir, cmd, { itermWindow: cfg.itermWindow }); return { ok: true, msg: `Opened in ${TUI[ed].name} (${note})` }; }
     if (ed === 'custom') {
       if (!cfg.custom || !cfg.custom.trim()) return { ok: false, msg: 'Custom command is empty — set it in settings' };
       const cmd = cfg.custom.replace(/\{file\}/g, q(target)).replace(/\{line\}/g, String(line)).replace(/\{dir\}/g, q(dir));

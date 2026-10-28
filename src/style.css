@@ -141,3 +141,8 @@ body.mac .top { padding-left:84px; }
 .b-new { color:var(--accent); border-color:var(--accent); font-weight:600; }
 .ud { display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--accent); margin-right:6px; vertical-align:middle; }
 #settings label input[type=checkbox] { width:auto; }
+
+.diff tr.tgt td { box-shadow: inset 0 0 0 9999px rgba(56,139,253,.22); } .diff td.n { cursor:pointer; }
+#settings textarea { background:var(--bg); border:1px solid var(--border); border-radius:6px; padding:8px 10px; resize:vertical; font:inherit; color:inherit; }
+#settings button.lnk { background:none; border:0; padding:0; color:var(--accent,#58a6ff); cursor:pointer; text-decoration:underline; font-size:12px; }
+.lk .qd { flex:none; width:22px; align-self:center; text-align:center; } .lk .lt { flex:1; }
